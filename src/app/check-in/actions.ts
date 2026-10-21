@@ -1,81 +1,90 @@
 "use server";
 
-import { getRepository, type SaveResult, type WriteMeta } from "@/lib/data";
+import { refresh } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
+
+import { getRepository, type DeleteInput } from "@/lib/data";
+import { UUID_PATTERN, validateEveningCheckIn, validateMorningCheckIn } from "@/lib/domain/checkins";
 import {
-  validateEveningCheckIn,
-  validateMorningCheckIn,
-  type FieldErrors,
-  type RawForm,
-} from "@/lib/domain/checkins";
+  fromResult,
+  invalid,
+  serverFailure,
+  staleForm,
+  toRaw,
+  writeMeta,
+  type CheckInFormState,
+} from "@/lib/forms/server-form";
 
-export interface CheckInFormState {
-  status: "idle" | "invalid" | "saved" | "not_persisted" | "conflict" | "failed";
-  message: string | null;
-  errors: FieldErrors;
-}
-
-function toRaw(formData: FormData): RawForm {
-  const raw: RawForm = {};
-  for (const [key, value] of formData.entries()) {
-    if (typeof value === "string") raw[key] = value;
-  }
-  return raw;
-}
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** Idempotency key and the revision being edited (empty when creating). */
-function writeMeta(raw: RawForm): WriteMeta {
-  const requestId = raw.requestId && UUID.test(raw.requestId) ? raw.requestId : crypto.randomUUID();
-  const revision = raw.expectedRevision ? Number(raw.expectedRevision) : NaN;
-  return { requestId, expectedRevision: Number.isInteger(revision) && revision > 0 ? revision : null };
-}
-
-const invalid = (errors: FieldErrors): CheckInFormState => ({
-  status: "invalid",
-  message: "Some answers need attention. Nothing you entered was cleared.",
-  errors,
-});
-
-function fromSave(result: SaveResult): CheckInFormState {
-  switch (result.status) {
-    case "saved":
-      return { status: "saved", message: "Saved.", errors: {} };
-    case "not_persisted":
-      return { status: "not_persisted", message: result.reason, errors: {} };
-    case "conflict":
-    case "not_found":
-      return { status: "conflict", message: `Not saved: ${result.reason} Your answers are still here.`, errors: {} };
-    case "failed":
-      return { status: "failed", message: `Not saved: ${result.reason} Your answers are still here.`, errors: {} };
-  }
-}
+export type { CheckInFormState };
 
 export async function submitMorningCheckIn(_prev: CheckInFormState, formData: FormData): Promise<CheckInFormState> {
   const raw = toRaw(formData);
+  const meta = writeMeta(raw);
+  if (!meta) return staleForm;
   const parsed = validateMorningCheckIn(raw);
   if (!parsed.ok) return invalid(parsed.errors);
   try {
     const repo = await getRepository();
-    return fromSave(await repo.saveMorningCheckIn(parsed.value, writeMeta(raw)));
-  } catch {
-    return fromSave({ status: "failed", reason: "The server could not save this check-in." });
+    // Sleep belongs to the waking date, which cannot be later than today in the user's timezone.
+    if (parsed.value.wakingDate > (await repo.getToday())) {
+      return invalid({ wakingDate: "The waking date can't be in the future." });
+    }
+    return fromResult(await repo.saveMorningCheckIn(parsed.value, meta));
+  } catch (error) {
+    unstable_rethrow(error);
+    return serverFailure;
   }
 }
 
 export async function submitEveningCheckIn(_prev: CheckInFormState, formData: FormData): Promise<CheckInFormState> {
+  const raw = toRaw(formData);
+  const meta = writeMeta(raw);
+  if (!meta) return staleForm;
   try {
     const repo = await getRepository();
-    const raw = toRaw(formData);
-    const date = raw.localDate ?? (await repo.getToday());
+    const today = await repo.getToday();
+    const date = raw.localDate ?? today;
+    if (date > today) return invalid({ localDate: "An evening check-in can't be for a future date." });
     // Count existing activities server-side; never trust the client for conflicts.
     const existing = (await repo.listActivities({ start: date, end: date })).filter(
       (a) => a.canonicalStatus === "canonical",
     );
     const parsed = validateEveningCheckIn(raw, existing.length);
     if (!parsed.ok) return invalid(parsed.errors);
-    return fromSave(await repo.saveEveningCheckIn(parsed.value, writeMeta(raw)));
-  } catch {
-    return fromSave({ status: "failed", reason: "The server could not save this check-in." });
+    return fromResult(await repo.saveEveningCheckIn(parsed.value, meta));
+  } catch (error) {
+    unstable_rethrow(error);
+    return serverFailure;
+  }
+}
+
+export type RecordKind = "sleep" | "evening" | "symptom" | "activity";
+
+export interface DeleteState {
+  status: "idle" | "deleted" | "failed";
+  message: string | null;
+}
+
+export async function deleteRecord(kind: RecordKind, input: DeleteInput): Promise<DeleteState> {
+  if (!UUID_PATTERN.test(input.id) || !Number.isInteger(input.expectedRevision)) {
+    return { status: "failed", message: "Not deleted: reload the page and try again." };
+  }
+  try {
+    const repo = await getRepository();
+    const remove = {
+      sleep: repo.deleteSleepEntry,
+      evening: repo.deleteEveningEntry,
+      symptom: repo.deleteSymptomEntry,
+      activity: repo.deleteActivity,
+    }[kind];
+    const result = await remove(input);
+    if (result.status === "saved") {
+      refresh();
+      return { status: "deleted", message: "Deleted." };
+    }
+    return { status: "failed", message: `Not deleted: ${"reason" in result ? result.reason : "try again."}` };
+  } catch (error) {
+    unstable_rethrow(error);
+    return { status: "failed", message: "Not deleted: the server could not be reached. Try again." };
   }
 }

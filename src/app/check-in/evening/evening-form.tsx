@@ -4,9 +4,18 @@ import { useActionState, useId, useState, useTransition, type FormEvent } from "
 
 import type { QuickActivityInput } from "@/lib/domain/checkins";
 import { activityTypeLabel, intensityLabel } from "@/lib/domain/format";
-import type { ActivityStatus, ActivityType, EveningEntry, Intensity } from "@/lib/domain/types";
-import { submitEveningCheckIn } from "../actions";
-import { AnkleFields, ChoiceGroup, FieldError, SaveStatus, initialFormState } from "../form-parts";
+import type { ActivityStatus, ActivityType, EveningEntry, Intensity, SymptomEntry } from "@/lib/domain/types";
+import { newUuid } from "@/lib/uuid";
+import { submitEveningCheckIn, type CheckInFormState } from "../actions";
+import {
+  AnkleFields,
+  ChoiceGroup,
+  EditTarget,
+  FieldError,
+  SaveStatus,
+  initialFormState,
+  useRequestId,
+} from "../form-parts";
 
 export interface ExistingActivityView {
   id: string;
@@ -20,23 +29,33 @@ interface PendingActivity extends QuickActivityInput {
 }
 
 export function EveningForm({
-  today,
+  date,
   existingActivities,
   existing,
+  symptom,
 }: {
-  today: string;
+  date: string;
   existingActivities: ExistingActivityView[];
   existing: EveningEntry | null;
+  /** The ankle observation saved with this check-in, if any. */
+  symptom: SymptomEntry | null;
 }) {
-  const [state, formAction] = useActionState(submitEveningCheckIn, initialFormState);
-  const [pending, startTransition] = useTransition();
   const [added, setAdded] = useState<PendingActivity[]>([]);
+  const [state, formAction] = useActionState(async (prev: CheckInFormState, data: FormData) => {
+    const result = await submitEveningCheckIn(prev, data);
+    // Saved quick-adds now come back from the server as recorded activities.
+    if (result.status === "saved") setAdded([]);
+    return result;
+  }, initialFormState);
+  const [pending, startTransition] = useTransition();
+  const nextRequestId = useRequestId();
   const [status, setStatus] = useState<ActivityStatus | null>(
     existing?.activityStatus ?? (existingActivities.length > 0 ? "logged" : null),
   );
   const [draftType, setDraftType] = useState<ActivityType>("walking");
   const [draftMinutes, setDraftMinutes] = useState("");
   const [draftIntensity, setDraftIntensity] = useState<Intensity>("easy");
+  const [draftStart, setDraftStart] = useState("");
   const [draftError, setDraftError] = useState<string | null>(null);
   const idPrefix = useId();
   const errors = state.errors;
@@ -50,16 +69,36 @@ export function EveningForm({
     setDraftError(null);
     setAdded((list) => [
       ...list,
-      { key: `${idPrefix}-${list.length}-${Date.now()}`, type: draftType, durationMinutes: minutes, intensity: draftIntensity },
+      {
+        key: `${idPrefix}-${list.length}-${Date.now()}`,
+        requestId: newUuid(),
+        type: draftType,
+        durationMinutes: minutes,
+        intensity: draftIntensity,
+        startTime: draftStart || null,
+      },
     ]);
     setDraftMinutes("");
+    setDraftStart("");
     setStatus("logged");
   };
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    data.set("activities", JSON.stringify(added.map(({ type, durationMinutes, intensity }) => ({ type, durationMinutes, intensity }))));
+    data.set(
+      "activities",
+      JSON.stringify(
+        added.map(({ requestId, type, durationMinutes, intensity, startTime }) => ({
+          requestId,
+          type,
+          durationMinutes,
+          intensity,
+          startTime,
+        })),
+      ),
+    );
+    data.set("requestId", nextRequestId(state.status));
     startTransition(() => formAction(data));
   };
 
@@ -67,13 +106,15 @@ export function EveningForm({
 
   return (
     <form className="stack" onSubmit={onSubmit} noValidate>
-      <input type="hidden" name="localDate" value={today} />
+      <input type="hidden" name="localDate" value={date} />
+      <input type="hidden" name="seenActivityIds" value={existingActivities.map((a) => a.id).join(",")} />
+      <EditTarget id={existing?.id} revision={existing?.revision} />
 
       <section className="card stack" aria-labelledby="activities-heading">
-        <h2 id="activities-heading">Today&apos;s activity</h2>
+        <h2 id="activities-heading">Activity</h2>
 
         {totalActivities === 0 ? (
-          <p className="muted">No activities recorded yet today.</p>
+          <p className="muted">No activities recorded yet for this day.</p>
         ) : (
           <ul className="list-plain divided">
             {existingActivities.map((a) => (
@@ -90,6 +131,7 @@ export function EveningForm({
                 <div className="entry-main">
                   <strong>{activityTypeLabel[a.type]}</strong>
                   <p className="small muted">
+                    {a.startTime ? `${a.startTime} · ` : ""}
                     {a.durationMinutes} min · {intensityLabel[a.intensity]} · added now, not saved yet
                   </p>
                 </div>
@@ -133,6 +175,12 @@ export function EveningForm({
                 onChange={(e) => setDraftMinutes(e.target.value)}
                 aria-invalid={draftError ? true : undefined}
               />
+            </div>
+            <div className="field">
+              <label htmlFor="draftStart" className="small">
+                Start (optional)
+              </label>
+              <input id="draftStart" type="time" value={draftStart} onChange={(e) => setDraftStart(e.target.value)} />
             </div>
             <div className="field">
               <label htmlFor="draftIntensity" className="small">
@@ -208,7 +256,7 @@ export function EveningForm({
 
       <section className="card stack" aria-labelledby="ankle-heading">
         <h2 id="ankle-heading">Ankle</h2>
-        <AnkleFields errors={errors} />
+        <AnkleFields errors={errors} defaults={symptom} />
       </section>
 
       <section className="card stack">
@@ -233,7 +281,7 @@ export function EveningForm({
       <div className="form-actions">
         <SaveStatus state={state} pending={pending} />
         <button className="button button-block" type="submit" disabled={pending}>
-          Confirm today&apos;s record
+          {existing ? "Update this day's record" : "Confirm this day's record"}
         </button>
       </div>
     </form>

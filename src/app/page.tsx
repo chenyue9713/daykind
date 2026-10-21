@@ -5,7 +5,13 @@ import { GuidanceCard } from "@/components/guidance-card";
 import { PageHeader, PageSkeleton, SampleBadge } from "@/components/ui";
 import { WeeklyProgressCard } from "@/components/weekly-progress";
 import { formatLocalDate, formatTime } from "@/lib/domain/dates";
-import { activityTypeLabel, formatDuration, formatSleepDuration, intensityLabel } from "@/lib/domain/format";
+import {
+  activityTypeLabel,
+  durationBasisLabel,
+  formatDuration,
+  formatSleepDuration,
+  intensityLabel,
+} from "@/lib/domain/format";
 import { goalSeconds } from "@/lib/domain/targets";
 import { loadToday } from "@/lib/views/loaders";
 
@@ -74,6 +80,11 @@ async function TodayContent() {
           {morningDone ? "Start evening check-in" : "Start morning check-in"}
         </Link>
         <p className="small muted">Reminders are not set up yet; check-ins appear here when due.</p>
+        {view.isSample ? null : (
+          <p className="small muted">
+            Saved check-ins appear on your other devices after they refresh this page.
+          </p>
+        )}
       </section>
 
       <GuidanceCard guidance={guidance} timezone={profile.timezone} />
@@ -81,12 +92,16 @@ async function TodayContent() {
       <section className="card" aria-labelledby="activity-heading">
         <div className="card-header">
           <h2 id="activity-heading">Today&apos;s activity</h2>
-          <Link href="/check-in/evening" className="small">
+          <Link href="/activities/new" className="small">
             Add activity
           </Link>
         </div>
         {view.activitiesToday.length === 0 ? (
-          <p className="muted">Nothing recorded yet today.</p>
+          <p className="muted">
+            {eveningToday?.activityStatus === "confirmed_none"
+              ? "You confirmed no activity today."
+              : "Nothing recorded yet today. Not logged is different from no activity."}
+          </p>
         ) : (
           <ul className="list-plain divided">
             {view.activitiesToday.map((a) => {
@@ -96,8 +111,8 @@ async function TodayContent() {
                   <div className="entry-main">
                     <strong>{activityTypeLabel[a.type]}</strong>
                     <p className="small muted">
-                      {formatTime(a.startedAt, profile.timezone)} · {formatDuration(seconds)}
-                      {basis === "elapsed" ? " (elapsed time)" : ""} · {intensityLabel[a.intensity]}
+                      {formatTime(a.startedAt, a.timezone)} · {formatDuration(seconds)} {durationBasisLabel[basis]} ·{" "}
+                      {intensityLabel[a.intensity]}
                     </p>
                   </div>
                   {a.source === "sample" ? <SampleBadge /> : null}

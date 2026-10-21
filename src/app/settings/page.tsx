@@ -5,6 +5,7 @@ import { LaterBadge, PageHeader, PageSkeleton, SampleBadge } from "@/components/
 import { formatDuration } from "@/lib/domain/format";
 import { GUIDANCE_RULE_VERSION } from "@/lib/domain/guidance";
 import { loadSettings } from "@/lib/views/loaders";
+import { signOut } from "../sign-in/actions";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -32,7 +33,7 @@ function LaterSection({ id, title, children }: { id: string; title: string; chil
 }
 
 async function SettingsContent() {
-  const { profile, goals, isSample, dataSource } = await loadSettings();
+  const { profile, goals, isSample, dataSource, email } = await loadSettings();
 
   return (
     <div className="stack">
@@ -43,13 +44,21 @@ async function SettingsContent() {
         </div>
         <dl className="kv">
           <dt>Signed in as</dt>
-          <dd>{profile.displayName}</dd>
+          <dd>{email ?? profile.displayName}</dd>
           <dt>Data source</dt>
-          <dd>{dataSource === "sample" ? "Sample data (read-only)" : dataSource}</dd>
+          <dd>{dataSource === "sample" ? "Sample data (read-only)" : "Private Supabase database"}</dd>
         </dl>
-        <p className="small muted">
-          Sign-in and private storage are not connected yet. Every visitor currently sees the same sample data.
-        </p>
+        {isSample ? (
+          <p className="small muted">
+            Sign-in and private storage are off in sample mode. Every visitor sees the same sample data.
+          </p>
+        ) : (
+          <form action={signOut}>
+            <button className="button button-secondary" type="submit">
+              Sign out
+            </button>
+          </form>
+        )}
       </section>
 
       <section className="card stack-sm" aria-labelledby="prefs-heading">
@@ -67,7 +76,10 @@ async function SettingsContent() {
             {profile.weightTrackingEnabled ? (profile.weightUnit === "lb" ? "Pounds" : "Kilograms") : "Not tracked"}
           </dd>
         </dl>
-        <p className="small muted">Editing preferences will be available once storage is connected.</p>
+        <p className="small muted">
+          Editing preferences is a later task.
+          {isSample || profile.timezoneConfirmed ? "" : " Dates use this timezone until you can confirm or change it."}
+        </p>
       </section>
 
       <section className="card stack-sm" aria-labelledby="goals-heading">

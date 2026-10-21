@@ -1,9 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { FieldErrors } from "@/lib/domain/checkins";
+import { newUuid } from "@/lib/uuid";
 import type { CheckInFormState } from "./actions";
+
+/**
+ * One request id per save attempt. After a failure whose outcome is unknown
+ * (for example a dropped connection), the retry reuses the same id so the
+ * server returns the first result instead of saving twice. Any definite
+ * outcome starts a new attempt.
+ */
+export function useRequestId() {
+  const current = useRef<string | null>(null);
+  return (lastStatus: CheckInFormState["status"]) => {
+    if (current.current === null || lastStatus !== "failed") current.current = newUuid();
+    return current.current;
+  };
+}
+
+/** Hidden fields that identify the record being edited and its revision. */
+export function EditTarget({ id, revision }: { id?: string | null; revision?: number | null }) {
+  return (
+    <>
+      <input type="hidden" name="entryId" value={id ?? ""} />
+      <input type="hidden" name="expectedRevision" value={revision ?? ""} />
+    </>
+  );
+}
 
 export function FieldError({ id, errors, name }: { id?: string; errors: FieldErrors; name: string }) {
   const message = errors[name];
@@ -105,6 +130,7 @@ export interface SymptomDefaults {
   newOrWorsening: boolean;
   swellingHeatRedness: boolean;
   weightBearingDifficulty: boolean;
+  feverOrUnwell?: boolean | null;
 }
 
 export function AnkleFields({ errors, defaults }: { errors: FieldErrors; defaults?: SymptomDefaults | null }) {
@@ -174,15 +200,20 @@ export function AnkleFields({ errors, defaults }: { errors: FieldErrors; default
           <legend>Do you have a fever, shivering, or feel generally unwell?</legend>
           <div className="choice-group cols-3">
             <label className="choice">
-              <input type="radio" name="feverOrUnwell" value="yes" />
+              <input type="radio" name="feverOrUnwell" value="yes" defaultChecked={defaults?.feverOrUnwell === true} />
               Yes
             </label>
             <label className="choice">
-              <input type="radio" name="feverOrUnwell" value="no" />
+              <input type="radio" name="feverOrUnwell" value="no" defaultChecked={defaults?.feverOrUnwell === false} />
               No
             </label>
             <label className="choice">
-              <input type="radio" name="feverOrUnwell" value="" defaultChecked />
+              <input
+                type="radio"
+                name="feverOrUnwell"
+                value=""
+                defaultChecked={defaults?.feverOrUnwell === null || defaults?.feverOrUnwell === undefined}
+              />
               Not sure
             </label>
           </div>
@@ -193,12 +224,12 @@ export function AnkleFields({ errors, defaults }: { errors: FieldErrors; default
 }
 
 export function SaveStatus({ state, pending }: { state: CheckInFormState; pending: boolean }) {
-  if (pending) return <p className="notice small" role="status">Checking your answers…</p>;
+  if (pending) return <p className="notice small" role="status">Saving…</p>;
   if (state.status === "idle") return null;
   const tone =
     state.status === "saved" ? "notice-success" : state.status === "not_persisted" ? "notice-info" : "notice-error";
   return (
-    <p className={`notice small ${tone}`} role={state.status === "invalid" || state.status === "failed" ? "alert" : "status"}>
+    <p className={`notice small ${tone}`} role={state.status === "saved" || state.status === "not_persisted" ? "status" : "alert"}>
       {state.message}
     </p>
   );

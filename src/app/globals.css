@@ -606,6 +606,17 @@ p {
   background: var(--surface-muted);
 }
 
+.button-danger {
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+  border-color: var(--warning-fg);
+}
+
+.button-danger:hover {
+  background: var(--warning-bg);
+  text-decoration: underline;
+}
+
 .button:disabled,
 .button[aria-disabled="true"] {
   cursor: not-allowed;
@@ -825,6 +836,8 @@ details summary {
 
 .entry-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
   flex-shrink: 0;
 }
