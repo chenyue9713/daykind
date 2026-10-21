@@ -144,3 +144,8 @@ Validation runs twice: in TypeScript before the call, and again by database cons
 
 - Additive changes, such as new optional fields, methods, or statuses, keep `v1` compatible. Callers must treat an unknown result `status` as not saved.
 - Renaming or removing a field, changing a unit, or changing resolution semantics requires a new contract version, coordinated with the import feature first.
+
+## 6 Changelog
+
+- **v1** (`665c925`): initial contract.
+- **v1, additive:** `WriteMeta.id` is an optional id of the record being edited. `DayKindRepository.getSymptomEntry` is new. The `ActivityStore` methods and result statuses are unchanged.

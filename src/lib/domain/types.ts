@@ -79,6 +79,8 @@ export interface SleepEntry extends OwnedRecord {
   morningFatigue: Fatigue | null;
   note: string | null;
   completionState: CompletionState;
+  /** The ankle observation recorded with this check-in, if any. */
+  symptomEntryId?: string | null;
 }
 
 export interface EveningEntry extends OwnedRecord {
@@ -88,6 +90,8 @@ export interface EveningEntry extends OwnedRecord {
   /** Marked intentionally as a recovery day; does not change goal denominators. */
   recoveryDay: boolean;
   completionState: CompletionState;
+  /** The ankle observation recorded with this check-in. */
+  symptomEntryId?: string | null;
 }
 
 export interface SymptomEntry extends OwnedRecord {

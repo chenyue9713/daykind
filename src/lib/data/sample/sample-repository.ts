@@ -60,6 +60,7 @@ export function createSampleRepository({ userId, timezone }: Options): DayKindRe
     saveEveningCheckIn: async () => NOT_PERSISTED,
     deleteSleepEntry: async () => NOT_PERSISTED,
     deleteEveningEntry: async () => NOT_PERSISTED,
+    getSymptomEntry: async (id) => (await load()).data.symptoms.find((s) => s.id === id) ?? null,
     saveSymptomEntry: async () => NOT_PERSISTED,
     deleteSymptomEntry: async () => NOT_PERSISTED,
   };

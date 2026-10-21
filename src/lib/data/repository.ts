@@ -42,6 +42,8 @@ export type SaveResult = MutationResult<unknown>;
 export interface WriteMeta {
   requestId: string;
   expectedRevision: number | null;
+  /** The record being edited, when known; lets an edit change its date. */
+  id?: string | null;
 }
 
 export interface DeleteInput {
@@ -166,6 +168,7 @@ export interface DayKindRepository extends ActivityStore {
   /** Deletes the evening review only; its activities exist independently. */
   deleteEveningEntry(input: DeleteInput): Promise<MutationResult<null>>;
 
+  getSymptomEntry(id: string): Promise<SymptomEntry | null>;
   saveSymptomEntry(id: string | null, input: SymptomWrite, meta: WriteMeta): Promise<MutationResult<SymptomEntry>>;
   deleteSymptomEntry(input: DeleteInput): Promise<MutationResult<null>>;
 }

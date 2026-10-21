@@ -78,6 +78,15 @@ export function computeWeeklyProgress(
   };
 }
 
+/** The PRD's proposed default targets, used until the user saves their own. */
+export const DEFAULT_GOALS: GoalVersion = {
+  id: "default",
+  effectiveFrom: "1970-01-05",
+  walkingSecondsPerDay: 600,
+  resistanceSessionsPerWeek: 2,
+  cyclingSecondsPerWeek: 3600,
+};
+
 /** Picks the goal version in effect for a week (latest effective_from on or before its start). */
 export function goalsForWeek(versions: GoalVersion[], weekStartDate: LocalDate): GoalVersion | null {
   return (

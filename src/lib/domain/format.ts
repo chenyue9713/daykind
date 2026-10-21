@@ -1,4 +1,4 @@
-import type { ActivityType, Fatigue, Intensity, Restfulness } from "./types";
+import type { ActivityType, DurationBasis, Fatigue, Intensity, Restfulness } from "./types";
 
 /** Formats seconds as "7 h 30 min" without rounding a threshold into completion. */
 export function formatDuration(seconds: number | null): string {
@@ -38,6 +38,13 @@ export const activityTypeLabel: Record<ActivityType, string> = {
   cycling: "Ride",
   resistance: "Resistance session",
   other: "Other activity",
+};
+
+/** Shown after a duration so measured, fallback, and reported time are never confused. */
+export const durationBasisLabel: Record<DurationBasis, string> = {
+  active: "active time",
+  elapsed: "elapsed time (no timer data)",
+  reported: "as entered",
 };
 
 export const intensityLabel: Record<Intensity, string> = {
