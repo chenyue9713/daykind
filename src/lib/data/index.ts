@@ -6,7 +6,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import type { DayKindRepository } from "./repository";
 import { createSampleRepository } from "./sample/sample-repository";
 
-export type { DayKindRepository, SaveResult } from "./repository";
+export type * from "./repository";
 
 function configuredSource(): string {
   return process.env.DAYKIND_DATA_SOURCE || "sample";

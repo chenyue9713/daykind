@@ -19,19 +19,24 @@ export const goals: GoalVersion = {
 let n = 0;
 
 export function activity(overrides: Partial<Activity> & Pick<Activity, "type" | "localDate">): Activity {
+  const activeSeconds = overrides.activeSeconds ?? null;
   return {
     ...base,
     id: `a${n++}`,
     startedAt: `${overrides.localDate}T18:00:00.000Z`,
     timezone: "America/Los_Angeles",
     elapsedSeconds: 600,
-    activeSeconds: null,
+    activeSeconds,
+    reportedSeconds: null,
+    durationBasis: activeSeconds !== null ? "active" : "elapsed",
     distanceMeters: null,
     avgHeartRateBpm: null,
     maxHeartRateBpm: null,
     intensity: "easy",
     note: null,
     canonicalStatus: "canonical",
+    linkedActivityId: null,
+    fieldProvenance: {},
     ...overrides,
   };
 }

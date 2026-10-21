@@ -16,7 +16,17 @@ export type Fatigue = "energetic" | "mildly_tired" | "very_tired";
 
 export type ActivityType = "walking" | "cycling" | "resistance" | "other";
 export type Intensity = "easy" | "moderate" | "hard" | "unknown";
-export type DurationBasis = "active" | "elapsed";
+/**
+ * Which duration counts toward goals: timer/active time, elapsed time as a
+ * labeled fallback, or the duration the user reported for a manual entry.
+ */
+export type DurationBasis = "active" | "elapsed" | "reported";
+/**
+ * `canonical` counts toward goals. `linked` was merged into or replaced by
+ * `linkedActivityId` and is kept for history only. `deleted` is reserved for
+ * sample data; stored activities are removed on deletion.
+ */
+export type CanonicalStatus = "canonical" | "linked" | "deleted";
 
 /** Evening review of whether activity happened today. */
 export type ActivityStatus = "logged" | "confirmed_none" | "unknown";
@@ -97,17 +107,73 @@ export interface SymptomEntry extends OwnedRecord {
 
 export interface Activity extends OwnedRecord {
   type: ActivityType;
-  startedAt: Instant;
+  /** Start instant; null when a manual entry has no start time. */
+  startedAt: Instant | null;
+  /** Local start date in `timezone`, frozen at entry or import (cross-midnight uses the start). */
   localDate: LocalDate;
+  /** IANA timezone captured when the activity was entered or imported. */
   timezone: string;
-  elapsedSeconds: number;
+  /** Measured wall-clock duration, including pauses. */
+  elapsedSeconds: number | null;
+  /** Measured timer/moving duration, excluding pauses. */
   activeSeconds: number | null;
+  /** Duration the user typed for a manual entry. */
+  reportedSeconds: number | null;
+  /** The duration that counts toward goals; that field is never null. */
+  durationBasis: DurationBasis;
   distanceMeters: number | null;
   avgHeartRateBpm: number | null;
   maxHeartRateBpm: number | null;
   intensity: Intensity;
   note: string | null;
-  canonicalStatus: "canonical" | "linked" | "deleted";
+  canonicalStatus: CanonicalStatus;
+  /** Set when `canonicalStatus` is "linked": the activity that now counts instead. */
+  linkedActivityId: string | null;
+  /** Which kind of source supplied each field, so screens can show measured versus reported. */
+  fieldProvenance: FieldProvenanceMap;
+}
+
+/** Activity fields whose origin is tracked. */
+export type ActivityField =
+  | "type"
+  | "startedAt"
+  | "elapsedSeconds"
+  | "activeSeconds"
+  | "reportedSeconds"
+  | "distanceMeters"
+  | "avgHeartRateBpm"
+  | "maxHeartRateBpm"
+  | "intensity"
+  | "note";
+
+/**
+ * `measured` came from a device file, `reported` was typed by the user,
+ * `derived` was calculated (e.g. time-weighted heart rate from samples).
+ */
+export type ProvenanceKind = "measured" | "reported" | "derived";
+
+export interface FieldProvenance {
+  source: DataSource;
+  kind: ProvenanceKind;
+}
+
+export type FieldProvenanceMap = Partial<Record<ActivityField, FieldProvenance>>;
+
+/** Where an activity's data came from. Several sources may link to one activity. */
+export interface ActivitySource {
+  id: string;
+  userId: string;
+  activityId: string;
+  createdAt: Instant;
+  sourceKind: DataSource;
+  /** Identifier inside the source (e.g. a FIT/TCX activity id); unique per user and source kind. */
+  providerId: string | null;
+  /** Lowercase hex SHA-256 of the imported file; null for manual sources. */
+  fileHash: string | null;
+  /** Permitted summary values extracted from the file, in canonical units. No GPS or raw streams. */
+  importedSummary: Record<string, unknown> | null;
+  fieldProvenance: FieldProvenanceMap;
+  decoderVersion: string | null;
 }
 
 export interface WeightEntry extends OwnedRecord {

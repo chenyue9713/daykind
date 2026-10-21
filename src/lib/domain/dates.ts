@@ -125,7 +125,9 @@ export function formatRange(range: DateRange): string {
   return `${formatLocalDate(range.start)} – ${formatLocalDate(range.end)}`;
 }
 
-export function formatTime(instant: Instant, timeZone: string): string {
+/** Formats an instant's wall-clock time; manual activities may have no start time. */
+export function formatTime(instant: Instant | null, timeZone: string): string {
+  if (instant === null) return "Time not recorded";
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",

@@ -1,5 +1,6 @@
 // Weekly target math (PRD FR05). Raw seconds are compared to thresholds
 // before any rounding for display.
+import { goalSecondsOf } from "./activity";
 import { datesInRange, inRange } from "./dates";
 import type { Activity, DateRange, DurationBasis, EveningEntry, GoalVersion, LocalDate } from "./types";
 
@@ -7,10 +8,12 @@ export function countsTowardGoals(activity: Activity): boolean {
   return activity.canonicalStatus === "canonical";
 }
 
-/** Timer/active duration when present, otherwise elapsed with a visible fallback label. */
+/**
+ * The duration that counts toward goals and its basis: timer/active time when
+ * measured, elapsed time as a labeled fallback, or the user's reported minutes.
+ */
 export function goalSeconds(activity: Activity): { seconds: number; basis: DurationBasis } {
-  if (activity.activeSeconds !== null) return { seconds: activity.activeSeconds, basis: "active" };
-  return { seconds: activity.elapsedSeconds, basis: "elapsed" };
+  return { seconds: goalSecondsOf(activity), basis: activity.durationBasis };
 }
 
 export interface WalkingDay {

@@ -93,7 +93,7 @@ export async function loadHistory() {
     symptoms: symptoms.filter((s) => s.localDate === date).sort((a, b) => (a.observedAt < b.observedAt ? -1 : 1)),
     activities: activities
       .filter((a) => a.localDate === date && a.canonicalStatus !== "deleted")
-      .sort((a, b) => (a.startedAt < b.startedAt ? -1 : 1)),
+      .sort((a, b) => ((a.startedAt ?? a.createdAt) < (b.startedAt ?? b.createdAt) ? -1 : 1)),
     weights: weights.filter((w) => w.localDate === date),
   }));
 
