@@ -1,0 +1,105 @@
+/* Import screen. Builds on the shared primitives in globals.css. */
+
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+/* Visually hidden but focusable; the label acts as the large tap target. */
+.fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.fileInput:focus-visible + .pickerButton {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.pickerButton {
+  flex: 1 1 220px;
+}
+
+@media (min-width: 700px) {
+  .pickerButton {
+    flex: 0 0 auto;
+  }
+}
+
+.fileName {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.details dd {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.sub {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.failed {
+  border-style: dashed;
+}
+
+.errorList,
+.warningList {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.errorList {
+  color: var(--warning-fg);
+}
+
+.duplicates {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.candidate {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--surface-muted);
+}
+
+.changeTable {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.85rem;
+}
+
+.changeHead,
+.changeRow {
+  display: grid;
+  grid-template-columns: minmax(70px, 0.8fr) 1fr 1fr;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.changeHead {
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.changeRow > span {
+  overflow-wrap: anywhere;
+}
+
+.changeRow[data-changed="true"] > span:last-child {
+  font-weight: 600;
+  color: var(--accent-strong);
+}
