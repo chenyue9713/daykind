@@ -59,7 +59,8 @@ See [`.env.example`](.env.example). It contains no secrets.
 | `/activities/new`, `/activities/edit?id=` | Add or edit an activity at any time. Imported activities keep their measured values. |
 | `/symptoms/new`, `/symptoms/edit?id=` | Record or edit an ankle observation outside a check-in |
 | `/report` | **Weekly report**: the last completed Monday–Sunday week, with coverage, sleep, target status, symptoms, optional weight, and one focus |
-| `/settings` | **Settings**: account and sign-out, timezone, units, and targets. Reminders, Garmin import, and export/delete are marked "Not available yet". |
+| `/import` | **Import a workout file**: Garmin TCX or FIT upload, preview, and duplicate review before saving. Reached from the evening check-in and Settings. |
+| `/settings` | **Settings**: account and sign-out, timezone, units, targets, and a link to workout import. Reminders and export/delete are marked "Not available yet". |
 
 Phones get a bottom tab bar. Screens 900 px and wider get a sidebar.
 
@@ -108,7 +109,7 @@ This project uses Next.js 16 with **Cache Components** turned on, so data that d
 - **Onboarding and preferences:** confirming the timezone, units, and targets, editing them, saving the weekly focus, weight entry, and data export and account deletion. Until then the profile uses the PRD defaults, and the timezone is marked unconfirmed.
 - **Check-in drafts:** check-ins are saved complete only. Partial drafts and offline drafts are later work.
 - **Reminders and notifications** (10 AM, 9 PM, follow-ups, quiet hours, the Monday report notice). Settings says they are not available, and no reminders are sent.
-- **Garmin TCX/FIT import** is a separate feature built on [`doc/activity-contract.md`](doc/activity-contract.md). On this branch, the import button is still disabled.
+- **Garmin Connect sync.** Workouts come from manual entry or uploaded TCX/FIT files (built on [`doc/activity-contract.md`](doc/activity-contract.md)). There is no provider sync.
 - **Scheduled weekly reports.** The report is calculated each time the page opens. There are no stored, versioned, or stale/revised reports yet.
 - **Guidance wording** is draft text (rule set `draft-2026-10-20.1`) that still needs review against the user's own care guidance. Sleep and target thresholds are the PRD's proposed defaults (Section 15), not confirmed decisions.
 - Offline drafts and PWA installation. Devices stay in sync through the server: a saved change shows on another device after it refreshes. There is no live push.
