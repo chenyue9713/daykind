@@ -1,8 +1,9 @@
 import { connection } from "next/server";
 
+import { isSuspectedDuplicate } from "@/lib/domain/activity";
 import { inRange, localDateOf } from "@/lib/domain/dates";
 import type { DateRange } from "@/lib/domain/types";
-import type { DayKindRepository, SaveResult } from "../repository";
+import type { DayKindRepository } from "../repository";
 import { buildSampleDataset, type SampleDataset } from "./sample-data";
 
 interface Options {
@@ -10,10 +11,10 @@ interface Options {
   timezone: string;
 }
 
-const NOT_PERSISTED: SaveResult = {
+const NOT_PERSISTED = {
   status: "not_persisted",
   reason: "Sample mode: your entry passed validation but was not saved. Storage is not connected yet.",
-};
+} as const;
 
 /** Read-only repository over generated sample data. Writes are validated but never stored. */
 export function createSampleRepository({ userId, timezone }: Options): DayKindRepository {
@@ -44,7 +45,23 @@ export function createSampleRepository({ userId, timezone }: Options): DayKindRe
     listSymptomEntries: byRange((d) => d.symptoms, (s) => s.localDate),
     listActivities: byRange((d) => d.activities, (a) => a.localDate),
     listWeightEntries: byRange((d) => d.weights, (w) => w.localDate),
+    getActivity: async (id) => {
+      const activity = (await load()).data.activities.find((a) => a.id === id);
+      return activity ? { activity, sources: [] } : null;
+    },
+    findDuplicateCandidates: async (probe) =>
+      (await load()).data.activities.filter((a) => isSuspectedDuplicate(probe, a)),
+    findImportedFile: async () => null,
+    saveConfirmedImport: async () => NOT_PERSISTED,
+    createActivity: async () => NOT_PERSISTED,
+    updateActivity: async () => NOT_PERSISTED,
+    deleteActivity: async () => NOT_PERSISTED,
     saveMorningCheckIn: async () => NOT_PERSISTED,
     saveEveningCheckIn: async () => NOT_PERSISTED,
+    deleteSleepEntry: async () => NOT_PERSISTED,
+    deleteEveningEntry: async () => NOT_PERSISTED,
+    getSymptomEntry: async (id) => (await load()).data.symptoms.find((s) => s.id === id) ?? null,
+    saveSymptomEntry: async () => NOT_PERSISTED,
+    deleteSymptomEntry: async () => NOT_PERSISTED,
   };
 }

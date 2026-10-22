@@ -39,9 +39,13 @@ export interface MorningCheckIn {
 }
 
 export interface QuickActivityInput {
+  /** UUID created when the activity is added in the form, so a retry never saves it twice. */
+  requestId: string;
   type: ActivityType;
   durationMinutes: number;
   intensity: Intensity;
+  /** Local start time "HH:MM", or null when not entered. */
+  startTime: string | null;
 }
 
 export interface EveningCheckIn {
@@ -50,6 +54,8 @@ export interface EveningCheckIn {
   newActivities: QuickActivityInput[];
   /** Explicit confirmation that existing activities should be removed when marking none. */
   confirmRemoveExisting: boolean;
+  /** Activities the user saw in the form; only these may be removed by "no activity". */
+  seenActivityIds: string[];
   eveningFatigue: Fatigue;
   recoveryDay: boolean;
   symptom: SymptomInput;
@@ -66,6 +72,9 @@ const fatigueValues: Fatigue[] = ["energetic", "mildly_tired", "very_tired"];
 const activityTypes: ActivityType[] = ["walking", "cycling", "resistance", "other"];
 const intensities: Intensity[] = ["easy", "moderate", "hard", "unknown"];
 const sides: AnkleSide[] = ["left", "right", "both"];
+
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 function oneOf<T extends string>(values: readonly T[], raw: string | undefined): T | null {
   return values.includes(raw as T) ? (raw as T) : null;
@@ -203,11 +212,21 @@ function parseQuickActivities(json: string | undefined, errors: FieldErrors): Qu
     const type = oneOf(activityTypes, item?.type);
     const intensity = oneOf(intensities, item?.intensity) ?? "unknown";
     const minutes = Number(item?.durationMinutes);
+    const requestId = typeof item?.requestId === "string" && UUID_PATTERN.test(item.requestId) ? item.requestId : null;
+    const startTime = typeof item?.startTime === "string" && item.startTime !== "" ? item.startTime : null;
     if (!type || !Number.isInteger(minutes) || minutes <= 0 || minutes > 24 * 60) {
       errors.activities = "Each added activity needs a type and a duration in whole minutes.";
       continue;
     }
-    result.push({ type, durationMinutes: minutes, intensity });
+    if (startTime !== null && !TIME_PATTERN.test(startTime)) {
+      errors.activities = "Start times use hours and minutes, like 07:30.";
+      continue;
+    }
+    if (!requestId) {
+      errors.activities = "The added activities could not be read. Please add them again.";
+      continue;
+    }
+    result.push({ requestId, type, durationMinutes: minutes, intensity, startTime });
   }
   return result;
 }
@@ -247,6 +266,7 @@ export function validateEveningCheckIn(raw: RawForm, existingActivityCount: numb
       activityStatus: activityStatus!,
       newActivities,
       confirmRemoveExisting,
+      seenActivityIds: (raw.seenActivityIds ?? "").split(",").filter((id) => UUID_PATTERN.test(id)),
       eveningFatigue: eveningFatigue!,
       recoveryDay: raw.recoveryDay === "on",
       symptom: symptom!,

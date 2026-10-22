@@ -1,5 +1,6 @@
 // Weekly target math (PRD FR05). Raw seconds are compared to thresholds
 // before any rounding for display.
+import { goalSecondsOf } from "./activity";
 import { datesInRange, inRange } from "./dates";
 import type { Activity, DateRange, DurationBasis, EveningEntry, GoalVersion, LocalDate } from "./types";
 
@@ -7,10 +8,12 @@ export function countsTowardGoals(activity: Activity): boolean {
   return activity.canonicalStatus === "canonical";
 }
 
-/** Timer/active duration when present, otherwise elapsed with a visible fallback label. */
+/**
+ * The duration that counts toward goals and its basis: timer/active time when
+ * measured, elapsed time as a labeled fallback, or the user's reported minutes.
+ */
 export function goalSeconds(activity: Activity): { seconds: number; basis: DurationBasis } {
-  if (activity.activeSeconds !== null) return { seconds: activity.activeSeconds, basis: "active" };
-  return { seconds: activity.elapsedSeconds, basis: "elapsed" };
+  return { seconds: goalSecondsOf(activity), basis: activity.durationBasis };
 }
 
 export interface WalkingDay {
@@ -74,6 +77,15 @@ export function computeWeeklyProgress(
     unknownActivityDays: walkingDays.filter((d) => d.unknown).length,
   };
 }
+
+/** The PRD's proposed default targets, used until the user saves their own. */
+export const DEFAULT_GOALS: GoalVersion = {
+  id: "default",
+  effectiveFrom: "1970-01-05",
+  walkingSecondsPerDay: 600,
+  resistanceSessionsPerWeek: 2,
+  cyclingSecondsPerWeek: 3600,
+};
 
 /** Picks the goal version in effect for a week (latest effective_from on or before its start). */
 export function goalsForWeek(versions: GoalVersion[], weekStartDate: LocalDate): GoalVersion | null {

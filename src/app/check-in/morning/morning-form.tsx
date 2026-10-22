@@ -2,15 +2,17 @@
 
 import { useActionState, useState, useTransition, type FormEvent } from "react";
 
-import type { SleepEntry } from "@/lib/domain/types";
+import type { SleepEntry, SymptomEntry } from "@/lib/domain/types";
 import { submitMorningCheckIn } from "../actions";
 import {
   AnkleFields,
   ChoiceGroup,
   CountOrUnknown,
+  EditTarget,
   FieldError,
   SaveStatus,
   initialFormState,
+  useRequestId,
 } from "../form-parts";
 
 function split(seconds: number | null | undefined) {
@@ -39,9 +41,21 @@ function HoursMinutes({ prefix, label, seconds }: { prefix: string; label: strin
   );
 }
 
-export function MorningForm({ today, existing }: { today: string; existing: SleepEntry | null }) {
+export function MorningForm({
+  date,
+  today,
+  existing,
+  symptom,
+}: {
+  date: string;
+  today: string;
+  existing: SleepEntry | null;
+  /** The ankle observation saved with this check-in, if any. */
+  symptom: SymptomEntry | null;
+}) {
   const [state, formAction] = useActionState(submitMorningCheckIn, initialFormState);
   const [pending, startTransition] = useTransition();
+  const nextRequestId = useRequestId();
   const [approximate, setApproximate] = useState(existing?.approximate ?? false);
   const errors = state.errors;
 
@@ -50,11 +64,13 @@ export function MorningForm({ today, existing }: { today: string; existing: Slee
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    data.set("requestId", nextRequestId(state.status));
     startTransition(() => formAction(data));
   };
 
   return (
     <form className="stack" onSubmit={onSubmit} noValidate>
+      <EditTarget id={existing?.id} revision={existing?.revision} />
       <section className="card stack">
         <div className="field">
           <label htmlFor="wakingDate">Date you woke up</label>
@@ -62,7 +78,7 @@ export function MorningForm({ today, existing }: { today: string; existing: Slee
             id="wakingDate"
             name="wakingDate"
             type="date"
-            defaultValue={existing?.wakingDate ?? today}
+            defaultValue={existing?.wakingDate ?? date}
             max={today}
             aria-invalid={errors.wakingDate ? true : undefined}
           />
@@ -137,9 +153,9 @@ export function MorningForm({ today, existing }: { today: string; existing: Slee
 
       <section className="card">
         <details>
-          <summary>Update ankle symptoms (optional)</summary>
+          <summary>{symptom ? "Ankle symptoms saved with this check-in" : "Update ankle symptoms (optional)"}</summary>
           <div style={{ marginTop: 12 }}>
-            <AnkleFields errors={errors} />
+            <AnkleFields errors={errors} defaults={symptom} />
           </div>
         </details>
       </section>

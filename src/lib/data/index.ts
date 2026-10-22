@@ -3,10 +3,12 @@ import "server-only";
 import { cache } from "react";
 
 import { getCurrentUser } from "@/lib/auth/session";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { DayKindRepository } from "./repository";
 import { createSampleRepository } from "./sample/sample-repository";
+import { createSupabaseRepository } from "./supabase/supabase-repository";
 
-export type { DayKindRepository, SaveResult } from "./repository";
+export type * from "./repository";
 
 function configuredSource(): string {
   return process.env.DAYKIND_DATA_SOURCE || "sample";
@@ -19,11 +21,12 @@ export function isSampleMode(): boolean {
 
 /**
  * Returns the repository for the signed-in user, memoized per request. The
- * data source is chosen by DAYKIND_DATA_SOURCE; only "sample" exists today.
+ * data source is chosen by DAYKIND_DATA_SOURCE: "sample" (read-only invented
+ * data, no sign-in) or "supabase" (signed-in, stored data).
  */
 export const getRepository = cache(async (): Promise<DayKindRepository> => {
-  const user = await getCurrentUser();
   const source = configuredSource();
+  const user = await getCurrentUser();
 
   switch (source) {
     case "sample":
@@ -31,9 +34,9 @@ export const getRepository = cache(async (): Promise<DayKindRepository> => {
         userId: user.id,
         timezone: process.env.DAYKIND_SAMPLE_TIMEZONE || "America/Los_Angeles",
       });
+    case "supabase":
+      return createSupabaseRepository({ client: await createSupabaseServerClient(), userId: user.id });
     default:
-      throw new Error(
-        `DAYKIND_DATA_SOURCE="${source}" is not supported yet. Use "sample" until database storage is added.`,
-      );
+      throw new Error(`DAYKIND_DATA_SOURCE="${source}" is not supported. Use "sample" or "supabase".`);
   }
 });

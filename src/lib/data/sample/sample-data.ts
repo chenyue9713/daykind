@@ -89,12 +89,16 @@ export function buildSampleDataset(userId: string, timezone: string, today: Loca
       timezone,
       elapsedSeconds: elapsedMinutes * 60,
       activeSeconds: activeMinutes * 60,
+      reportedSeconds: null,
+      durationBasis: "active",
       distanceMeters,
       avgHeartRateBpm: null,
       maxHeartRateBpm: null,
       intensity,
       note: null,
       canonicalStatus: "canonical",
+      linkedActivityId: null,
+      fieldProvenance: {},
     });
   };
 

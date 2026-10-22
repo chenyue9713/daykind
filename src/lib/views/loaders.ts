@@ -2,12 +2,15 @@ import "server-only";
 
 // Screen loaders: compose repository reads with domain logic into view
 // models. Pages call these and render; they never touch a data source directly.
+import { getCurrentUser } from "@/lib/auth/session";
 import { getRepository } from "@/lib/data";
-import { addDays, previousWeekRange, weekRange, weekStart } from "@/lib/domain/dates";
+import { distanceFromMeters, isMeasuredActivity } from "@/lib/domain/activity-form";
+import { addDays, formatTime, isLocalDate, previousWeekRange, weekRange, weekStart } from "@/lib/domain/dates";
+import { durationBasisLabel, formatDuration } from "@/lib/domain/format";
 import { evaluateGuidance } from "@/lib/domain/guidance";
 import { buildWeeklyReport } from "@/lib/domain/report";
-import { computeWeeklyProgress, goalsForWeek } from "@/lib/domain/targets";
-import type { GoalVersion, LocalDate } from "@/lib/domain/types";
+import { computeWeeklyProgress, goalSeconds, goalsForWeek } from "@/lib/domain/targets";
+import type { Activity, GoalVersion, LocalDate, UserProfile } from "@/lib/domain/types";
 
 function requireGoals(versions: GoalVersion[], start: LocalDate): GoalVersion {
   const goals = goalsForWeek(versions, start);
@@ -41,34 +44,56 @@ export async function loadToday() {
     today,
     sleepToday,
     eveningToday,
-    activitiesToday: weekActivities.filter((a) => a.localDate === today),
+    activitiesToday: weekActivities.filter((a) => a.localDate === today && a.canonicalStatus === "canonical"),
     guidance: evaluateGuidance({ today, sleep: sleepToday, evening: eveningToday, symptoms }),
     progress: computeWeeklyProgress(week, requireGoals(goalVersions, week.start), weekActivities, weekEvening, today),
   };
 }
 
-export async function loadMorningCheckIn() {
-  const repo = await getRepository();
-  const [profile, today] = await Promise.all([repo.getProfile(), repo.getToday()]);
-  const [sleep, symptoms] = await Promise.all([
-    repo.listSleepEntries({ start: today, end: today }),
-    repo.listSymptomEntries({ start: addDays(today, -7), end: addDays(today, -1) }),
-  ]);
-  const lastSymptom = symptoms.sort((a, b) => (a.observedAt < b.observedAt ? 1 : -1))[0] ?? null;
-  return { isSample: repo.isSample, profile, today, existing: sleep[0] ?? null, lastSymptom };
+/**
+ * The check-in date requested in the URL (for editing an earlier day), or
+ * today. Future dates fall back to today: check-ins describe days that began.
+ */
+function checkInDate(requested: string | undefined, today: LocalDate): LocalDate {
+  return requested && isLocalDate(requested) && requested <= today ? requested : today;
 }
 
-export async function loadEveningCheckIn() {
+export async function loadMorningCheckIn(requestedDate?: string) {
   const repo = await getRepository();
   const [profile, today] = await Promise.all([repo.getProfile(), repo.getToday()]);
-  const range = { start: today, end: today };
-  const [activities, evening] = await Promise.all([repo.listActivities(range), repo.listEveningEntries(range)]);
+  const date = checkInDate(requestedDate, today);
+  const [sleep, symptoms] = await Promise.all([
+    repo.listSleepEntries({ start: date, end: date }),
+    repo.listSymptomEntries({ start: addDays(date, -7), end: date }),
+  ]);
+  const existing = sleep[0] ?? null;
+  const symptom = symptoms.find((s) => existing?.symptomEntryId && s.id === existing.symptomEntryId) ?? null;
+  const lastSymptom =
+    symptoms
+      .filter((s) => s.localDate < date)
+      .sort((a, b) => (a.observedAt < b.observedAt ? 1 : -1))[0] ?? null;
+  return { isSample: repo.isSample, profile, today, date, existing, symptom, lastSymptom };
+}
+
+export async function loadEveningCheckIn(requestedDate?: string) {
+  const repo = await getRepository();
+  const [profile, today] = await Promise.all([repo.getProfile(), repo.getToday()]);
+  const date = checkInDate(requestedDate, today);
+  const range = { start: date, end: date };
+  const [activities, evening, symptoms] = await Promise.all([
+    repo.listActivities(range),
+    repo.listEveningEntries(range),
+    repo.listSymptomEntries(range),
+  ]);
+  const existing = evening[0] ?? null;
   return {
     isSample: repo.isSample,
     profile,
     today,
+    date,
     activities: activities.filter((a) => a.canonicalStatus === "canonical"),
-    existing: evening[0] ?? null,
+    existing,
+    symptom: symptoms.find((s) => existing?.symptomEntryId && s.id === existing.symptomEntryId) ?? null,
   };
 }
 
@@ -93,7 +118,7 @@ export async function loadHistory() {
     symptoms: symptoms.filter((s) => s.localDate === date).sort((a, b) => (a.observedAt < b.observedAt ? -1 : 1)),
     activities: activities
       .filter((a) => a.localDate === date && a.canonicalStatus !== "deleted")
-      .sort((a, b) => (a.startedAt < b.startedAt ? -1 : 1)),
+      .sort((a, b) => ((a.startedAt ?? a.createdAt) < (b.startedAt ?? b.createdAt) ? -1 : 1)),
     weights: weights.filter((w) => w.localDate === date),
   }));
 
@@ -135,10 +160,73 @@ export async function loadSettings() {
     repo.getToday(),
     repo.getGoalVersions(),
   ]);
+  const user = await getCurrentUser();
   return {
     isSample: repo.isSample,
     dataSource: repo.kind,
+    email: user.email,
     profile,
     goals: requireGoals(goalVersions, weekStart(today)),
+  };
+}
+
+function localTime(activity: Activity): string {
+  if (activity.startedAt === null) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: activity.timezone,
+  }).format(new Date(activity.startedAt));
+}
+
+function measuredSummary(a: Activity, profile: UserProfile): string {
+  const { seconds, basis } = goalSeconds(a);
+  const parts = [formatTime(a.startedAt, a.timezone), `${formatDuration(seconds)} ${durationBasisLabel[basis]}`];
+  if (a.distanceMeters !== null) {
+    parts.push(`${distanceFromMeters(a.distanceMeters, profile.distanceUnit).toFixed(2)} ${profile.distanceUnit}`);
+  }
+  parts.push(a.avgHeartRateBpm === null ? "heart rate not recorded" : `average heart rate ${a.avgHeartRateBpm} bpm`);
+  return `${parts.join(" · ")}.`;
+}
+
+export async function loadNewActivityForm(requestedDate?: string) {
+  const repo = await getRepository();
+  const [profile, today] = await Promise.all([repo.getProfile(), repo.getToday()]);
+  return {
+    existing: null,
+    measured: false,
+    values: { localDate: checkInDate(requestedDate, today), startTime: "", durationMinutes: "", distance: "" },
+    today,
+    distanceUnit: profile.distanceUnit,
+    measuredSummary: null,
+  };
+}
+
+export async function loadEditActivityForm(id: string) {
+  const repo = await getRepository();
+  const [profile, today, detail] = await Promise.all([repo.getProfile(), repo.getToday(), repo.getActivity(id)]);
+  if (!detail) return null;
+  const a = detail.activity;
+  const measured = isMeasuredActivity(a);
+  return {
+    form: {
+      existing: a,
+      measured,
+      values: {
+        localDate: a.localDate,
+        startTime: localTime(a),
+        durationMinutes: String(Math.round(goalSeconds(a).seconds / 60)),
+        distance:
+          a.distanceMeters === null ? "" : String(Math.round(distanceFromMeters(a.distanceMeters, profile.distanceUnit) * 100) / 100),
+      },
+      today,
+      distanceUnit: profile.distanceUnit,
+      measuredSummary: measured ? measuredSummary(a, profile) : null,
+    },
+    sourceNote:
+      detail.sources.length > 1
+        ? `This activity combines ${detail.sources.length} sources: ${detail.sources.map((src) => src.sourceKind.toUpperCase()).join(", ")}.`
+        : null,
   };
 }
