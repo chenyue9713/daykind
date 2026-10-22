@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Suspense, type ReactNode } from "react";
 
 import { LaterBadge, PageHeader, PageSkeleton, SampleBadge } from "@/components/ui";
@@ -107,13 +108,19 @@ async function SettingsContent() {
         </p>
       </LaterSection>
 
-      <LaterSection id="integrations-heading" title="Garmin workout files">
+      <section className="card stack-sm" aria-labelledby="integrations-heading">
+        <h2 id="integrations-heading">Garmin workout files</h2>
         <p className="small">
-          Planned: upload TCX or FIT files exported from Garmin, preview them, and resolve duplicates before saving.
-          DayKind will never ask for your Garmin password.
+          Upload TCX or FIT files exported from Garmin, preview them, and resolve duplicates before saving. DayKind
+          will never ask for your Garmin password.
         </p>
-        <p className="small muted">File import is not built yet. Add workouts manually in the evening check-in.</p>
-      </LaterSection>
+        <div className="row">
+          <Link href="/import" className="button button-secondary">
+            Import a workout file
+          </Link>
+        </div>
+        <p className="small muted">Automatic sync with Garmin Connect is a later task.</p>
+      </section>
 
       <LaterSection id="data-heading" title="Your data">
         <div className="row">

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useId, useState, useTransition, type FormEvent } from "react";
 
 import type { QuickActivityInput } from "@/lib/domain/checkins";
@@ -204,12 +205,12 @@ export function EveningForm({
             <button type="button" className="button button-secondary" onClick={addActivity}>
               Add activity
             </button>
-            <button type="button" className="button button-secondary" disabled aria-describedby="import-later">
+            <Link href="/import" className="button button-secondary" aria-describedby="import-note">
               Import Garmin file
-            </button>
+            </Link>
           </div>
-          <p id="import-later" className="small muted">
-            Garmin TCX/FIT import is not available yet. Add workouts manually for now.
+          <p id="import-note" className="small muted">
+            Imports open on their own page. Save this check-in first; unsaved answers here are not kept.
           </p>
         </fieldset>
 
