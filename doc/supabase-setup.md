@@ -17,11 +17,16 @@ The migrations are in `supabase/migrations/` and must run in filename order:
 | `20261020120100_check_ins.sql` | `symptom_entries`, `sleep_entries`, `evening_entries` |
 | `20261020120200_activities.sql` | `activities`, `import_files`, `activity_sources`, plus link and cleanup triggers |
 | `20261020120300_write_functions.sql` | Transactional write functions: `save_morning_check_in`, `save_evening_check_in`, `create_manual_activity`, `update_activity`, `import_confirmed_activities` |
+| `20261022120000_preferences.sql` | Onboarding state and target bounds; a guard that keeps targets already in effect unchanged; `save_preferences` and `save_goal_version` |
 
 Apply them in one of two ways:
 
 - **Supabase CLI:** run `supabase link --project-ref <ref>`, then `supabase db push`.
 - **Dashboard:** paste each file into **SQL Editor** and run them in order.
+
+### Upgrading a project that already has the first four migrations
+
+Apply only `20261022120000_preferences.sql`, with `supabase db push` or by running that one file in the SQL Editor. Do not re-run the earlier files. The migration only adds columns, constraints, a trigger, and functions; existing check-ins, activities, and imports are untouched. After it is applied, the next visit sends the signed-in user to first-use setup (`/welcome`) once, to confirm the timezone, units, and targets.
 
 Every table has row-level security enabled. The `anon` role has no table access, and every policy requires both of these:
 
@@ -56,7 +61,7 @@ DAYKIND_ALLOWED_EMAILS=<the same email as above>
 
 Then run `npm run build && npm start`, or `npm run dev`. Set these **before** building, because the sample-data banner is decided at build time.
 
-The first visit redirects to `/sign-in`. After sign-in, DayKind creates the profile with the PRD defaults: timezone `America/Los_Angeles` (marked unconfirmed), miles, and pounds. It uses the default targets until custom targets are added.
+The first visit redirects to `/sign-in`. After sign-in, DayKind creates the profile with the PRD defaults (timezone `America/Los_Angeles`, unconfirmed; miles; pounds; weight not tracked) and opens first-use setup at `/welcome`. Confirm the timezone, choose units, review the targets (10 walking minutes a day, two resistance sessions and 60 cycling minutes a week), and acknowledge the guidance limits. Until setup is finished, every other screen redirects there. A target change starts the following Monday; the current week keeps the defaults.
 
 ## 5 Check that it works
 
@@ -74,6 +79,13 @@ In order:
    ```
 
 5. Sign in as an account that is not in `allowed_users`, if you create one for testing. It should see the "isn't allowed" message and no data.
+6. In Settings, change a target. It should show as an upcoming change from next Monday while "This week" stays the same. Edit it again and confirm that `goal_versions` still has only one future row:
+
+   ```sql
+   select effective_from, walking_seconds_per_day, revision from public.goal_versions order by effective_from;
+   ```
+
+7. Change the timezone in Settings on one device, then save the time-and-units form on the other device without reloading. It should say "Not saved" and keep the choices on screen. Earlier entries in History keep their dates.
 
 ## Notes
 

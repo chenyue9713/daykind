@@ -212,6 +212,8 @@ export function buildSampleDataset(userId: string, timezone: string, today: Loca
       weightUnit: "lb",
       weightTrackingEnabled: true,
       guidanceLimitsAcknowledgedAt: null,
+      onboardingCompletedAt: null,
+      revision: 1,
     },
     goals: [
       {
@@ -220,6 +222,7 @@ export function buildSampleDataset(userId: string, timezone: string, today: Loca
         walkingSecondsPerDay: 600,
         resistanceSessionsPerWeek: 2,
         cyclingSecondsPerWeek: 3600,
+        revision: 1,
       },
     ],
     sleep,

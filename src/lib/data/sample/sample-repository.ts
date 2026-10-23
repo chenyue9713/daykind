@@ -39,6 +39,8 @@ export function createSampleRepository({ userId, timezone }: Options): DayKindRe
     isSample: true,
     getProfile: async () => (await load()).data.profile,
     getGoalVersions: async () => (await load()).data.goals,
+    savePreferences: async () => NOT_PERSISTED,
+    saveTargets: async () => NOT_PERSISTED,
     getToday: async () => (await load()).today,
     listSleepEntries: byRange((d) => d.sleep, (s) => s.wakingDate),
     listEveningEntries: byRange((d) => d.evening, (e) => e.localDate),

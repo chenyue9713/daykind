@@ -54,6 +54,4 @@ export const intensityLabel: Record<Intensity, string> = {
   unknown: "Intensity unknown",
 };
 
-export function formatWeight(kg: number, unit: "kg" | "lb"): string {
-  return unit === "kg" ? `${kg.toFixed(1)} kg` : `${(kg / 0.45359237).toFixed(1)} lb`;
-}
+export { formatWeight } from "./units";

@@ -6,13 +6,22 @@ import { isSuspectedDuplicate, validateActivityDraft, type ActivityDraft } from 
 import { addDays, localDateOf } from "@/lib/domain/dates";
 import { DEFAULT_GOALS } from "@/lib/domain/targets";
 import type { DateRange, Instant, UserProfile } from "@/lib/domain/types";
-import type { DayKindRepository, DeleteInput, ImportSaveResult, MutationResult } from "../repository";
+import type {
+  DayKindRepository,
+  DeleteInput,
+  ImportSaveResult,
+  MutationResult,
+  PreferencesSaved,
+  TargetChange,
+} from "../repository";
 import {
   draftToRow,
   eveningPayload,
   importPayload,
   morningPayload,
+  preferencesPayload,
   symptomPayload,
+  targetsPayload,
   toActivity,
   toActivitySource,
   toEveningEntry,
@@ -115,6 +124,33 @@ export function createSupabaseRepository({ client, userId }: Options): DayKindRe
     return { status: "saved", savedAt: new Date().toISOString(), record: null };
   }
 
+  /** The outcome of apply_goal_change: {status: saved | unchanged, record?}. */
+  function targetChange(goal: Row | null | undefined): TargetChange | null {
+    if (!goal) return null;
+    if (goal.status === "unchanged") return { outcome: "unchanged", version: null };
+    const record = goal.record as Row | null;
+    return record ? { outcome: "scheduled", version: toGoalVersion(record) } : { outcome: "removed", version: null };
+  }
+
+  /** Maps a preferences or targets function result; "invalid" means the server checks were bypassed. */
+  function preferenceResult<T>(operation: string, data: unknown, error: unknown, map: (r: RpcResult) => T): MutationResult<T> {
+    if (error) {
+      logError(operation, error);
+      return { status: "failed", reason: SAVE_FAILED };
+    }
+    const r = data as RpcResult;
+    switch (r.status) {
+      case "saved":
+      case "unchanged":
+        return { status: "saved", savedAt: new Date().toISOString(), record: map(r) };
+      case "conflict":
+      case "not_found":
+        return { status: r.status, reason: r.reason ?? "This changed on another device. Reload to see the latest." };
+      default:
+        return { status: "failed", reason: r.reason ?? SAVE_FAILED };
+    }
+  }
+
   function invalidDraft(draft: ActivityDraft) {
     const errors = validateActivityDraft(draft);
     const first = Object.values(errors)[0];
@@ -128,7 +164,24 @@ export function createSupabaseRepository({ client, userId }: Options): DayKindRe
     getProfile,
     async getGoalVersions() {
       const rows = await select("targets", client.from("goal_versions").select("*").order("effective_from"));
-      return rows.length > 0 ? rows.map(toGoalVersion) : [DEFAULT_GOALS];
+      const versions = rows.map(toGoalVersion);
+      // The defaults cover every week before the first stored version. Saving
+      // the first change also stores them, so this only fills the gap until then.
+      return versions[0]?.effectiveFrom === DEFAULT_GOALS.effectiveFrom ? versions : [DEFAULT_GOALS, ...versions];
+    },
+    async savePreferences(input, meta) {
+      const { data, error } = await client.rpc("save_preferences", { p: preferencesPayload(input, meta) });
+      const result = preferenceResult("save_preferences", data, error, (r): PreferencesSaved => ({
+        profile: toProfile(r.record!),
+        targets: targetChange(r.goal as Row | null),
+      }));
+      // Later reads in this request see what was saved.
+      if (result.status === "saved") profile = Promise.resolve(result.record.profile);
+      return result;
+    },
+    async saveTargets(input, meta) {
+      const { data, error } = await client.rpc("save_goal_version", { p: targetsPayload(input, meta) });
+      return preferenceResult("save_goal_version", data, error, (r) => targetChange(r)!);
     },
     async getToday() {
       return localDateOf(new Date(), (await getProfile()).timezone);

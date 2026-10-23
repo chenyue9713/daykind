@@ -85,6 +85,7 @@ export const DEFAULT_GOALS: GoalVersion = {
   walkingSecondsPerDay: 600,
   resistanceSessionsPerWeek: 2,
   cyclingSecondsPerWeek: 3600,
+  revision: 0,
 };
 
 /** Picks the goal version in effect for a week (latest effective_from on or before its start). */
