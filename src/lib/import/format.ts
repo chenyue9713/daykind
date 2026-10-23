@@ -1,12 +1,8 @@
 // Display wording for the import preview. Pure and client-safe.
 import { formatDuration } from "@/lib/domain/format";
-import type { DistanceUnit } from "@/lib/domain/types";
 import type { DateConfidence, HeartRateSummary, SessionPreview } from "./types";
 
-export function formatDistance(meters: number | null, unit: DistanceUnit): string {
-  if (meters === null) return "Not recorded";
-  return unit === "mi" ? `${(meters / 1609.344).toFixed(2)} mi` : `${(meters / 1000).toFixed(2)} km`;
-}
+export { formatDistance } from "@/lib/domain/units";
 
 export function describeDuration(s: Pick<SessionPreview, "durationBasis" | "goalSeconds" | "elapsedSeconds" | "pausedSeconds">): {
   main: string;

@@ -361,6 +361,6 @@ describe("dates and timezones", () => {
       importPayload(fitImport(sha("f"), { kind: "create" }, rideDraft({ timezone: "Mars/Olympus" }))));
     expect(imported.status).toBe("invalid");
     await expect(selectAs(A, `insert into public.goal_versions (effective_from, walking_seconds_per_day, resistance_sessions_per_week, cycling_seconds_per_week)
-                              values ('2026-10-20', 600, 2, 3600)`)).rejects.toThrow(/check constraint/);
+                              values ('2030-01-08', 600, 2, 3600)`)).rejects.toThrow(/check constraint/); // a future Tuesday
   });
 });

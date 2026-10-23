@@ -56,14 +56,21 @@ export interface UserProfile {
   weightUnit: WeightUnit;
   weightTrackingEnabled: boolean;
   guidanceLimitsAcknowledgedAt: Instant | null;
+  /** Set once first-use setup is finished; null until then. */
+  onboardingCompletedAt: Instant | null;
+  /** Incremented on every save; a stale revision is a conflict. */
+  revision: number;
 }
 
+/** Weekly targets in effect from a Monday until the next version starts. */
 export interface GoalVersion {
   id: string;
+  /** A Monday in the user's timezone. */
   effectiveFrom: LocalDate;
   walkingSecondsPerDay: number;
   resistanceSessionsPerWeek: number;
   cyclingSecondsPerWeek: number;
+  revision: number;
 }
 
 export interface SleepEntry extends OwnedRecord {

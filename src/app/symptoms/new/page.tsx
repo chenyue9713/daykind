@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { PageHeader, PageSkeleton } from "@/components/ui";
-import { getRepository } from "@/lib/data";
+import { getSetUpRepository } from "@/lib/data";
 import { SymptomForm } from "../symptom-form";
 
 export const metadata: Metadata = { title: "Ankle update" };
@@ -19,6 +19,6 @@ export default function NewSymptomPage() {
 }
 
 async function NewSymptomContent() {
-  const repo = await getRepository();
+  const repo = await getSetUpRepository();
   return <SymptomForm existing={null} today={await repo.getToday()} />;
 }

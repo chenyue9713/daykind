@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 
 import { PageHeader, PageSkeleton } from "@/components/ui";
-import { getRepository } from "@/lib/data";
+import { getSetUpRepository } from "@/lib/data";
 import { formatLocalDate, formatTime } from "@/lib/domain/dates";
 import { SymptomForm } from "../symptom-form";
 
@@ -23,7 +23,7 @@ export default function EditSymptomPage({ searchParams }: PageProps<"/symptoms/e
 async function EditSymptomContent({ searchParams }: Pick<PageProps<"/symptoms/edit">, "searchParams">) {
   const { id } = await searchParams;
   if (typeof id !== "string") notFound();
-  const repo = await getRepository();
+  const repo = await getSetUpRepository();
   const [existing, today, profile] = await Promise.all([repo.getSymptomEntry(id), repo.getToday(), repo.getProfile()]);
   if (!existing) notFound();
   return (

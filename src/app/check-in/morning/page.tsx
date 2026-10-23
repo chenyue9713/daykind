@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { TimezoneCheck } from "@/components/timezone-check";
 import { PageHeader, PageSkeleton } from "@/components/ui";
 import { formatLocalDate } from "@/lib/domain/dates";
 import { loadMorningCheckIn } from "@/lib/views/loaders";
@@ -22,11 +23,12 @@ export default function MorningPage({ searchParams }: PageProps<"/check-in/morni
 
 async function MorningContent({ searchParams }: Pick<PageProps<"/check-in/morning">, "searchParams">) {
   const { date: requested } = await searchParams;
-  const { today, date, existing, symptom, lastSymptom, isSample } = await loadMorningCheckIn(
+  const { today, date, existing, symptom, lastSymptom, isSample, profile } = await loadMorningCheckIn(
     typeof requested === "string" ? requested : undefined,
   );
   return (
     <div className="stack">
+      {isSample ? null : <TimezoneCheck timezone={profile.timezone} />}
       {date !== today ? (
         <p className="notice small">
           Editing the check-in for {formatLocalDate(date, "long")}. <Link href="/check-in/morning">Go to today</Link>

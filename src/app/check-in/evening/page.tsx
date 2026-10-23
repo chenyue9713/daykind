@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { TimezoneCheck } from "@/components/timezone-check";
 import { PageHeader, PageSkeleton } from "@/components/ui";
 import { formatLocalDate, formatTime } from "@/lib/domain/dates";
 import { activityTypeLabel, durationBasisLabel, formatDuration, intensityLabel } from "@/lib/domain/format";
 import { goalSeconds } from "@/lib/domain/targets";
+import { formatDistance } from "@/lib/domain/units";
 import { loadEveningCheckIn } from "@/lib/views/loaders";
 import { EveningForm, type ExistingActivityView } from "./evening-form";
 
@@ -27,7 +29,7 @@ export default function EveningPage({ searchParams }: PageProps<"/check-in/eveni
 
 async function EveningContent({ searchParams }: Pick<PageProps<"/check-in/evening">, "searchParams">) {
   const { date: requested } = await searchParams;
-  const { today, date, activities, existing, symptom } = await loadEveningCheckIn(
+  const { today, date, activities, existing, symptom, isSample, profile } = await loadEveningCheckIn(
     typeof requested === "string" ? requested : undefined,
   );
   const views: ExistingActivityView[] = activities.map((a) => {
@@ -35,9 +37,14 @@ async function EveningContent({ searchParams }: Pick<PageProps<"/check-in/evenin
     return {
       id: a.id,
       title: activityTypeLabel[a.type],
-      detail: `${formatTime(a.startedAt, a.timezone)} · ${formatDuration(seconds)} ${durationBasisLabel[basis]} · ${
-        intensityLabel[a.intensity]
-      }`,
+      detail: [
+        formatTime(a.startedAt, a.timezone),
+        `${formatDuration(seconds)} ${durationBasisLabel[basis]}`,
+        a.distanceMeters === null ? null : formatDistance(a.distanceMeters, profile.distanceUnit),
+        intensityLabel[a.intensity],
+      ]
+        .filter(Boolean)
+        .join(" · "),
       isSample: a.source === "sample",
     };
   });
@@ -45,6 +52,7 @@ async function EveningContent({ searchParams }: Pick<PageProps<"/check-in/evenin
   return (
     <div className="stack">
       <p className="muted">{formatLocalDate(date, "long")}</p>
+      {isSample ? null : <TimezoneCheck timezone={profile.timezone} />}
       {date !== today ? (
         <p className="notice small">
           Editing an earlier day. <Link href="/check-in/evening">Go to today</Link>

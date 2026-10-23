@@ -62,8 +62,14 @@ function Distribution<T extends string>({
   );
 }
 
-function WeightSummary({ weight, unit }: { weight: WeeklyReport["weight"]; unit: "kg" | "lb" }) {
-  if (weight.sampleCount === 0) return <p className="muted">No weight entries this week. Weight tracking is optional.</p>;
+function WeightSummary({ weight, unit, tracking }: { weight: WeeklyReport["weight"]; unit: "kg" | "lb"; tracking: boolean }) {
+  if (weight.sampleCount === 0) {
+    return (
+      <p className="muted">
+        {tracking ? "No weight entries this week. Weight tracking is optional." : "Weight tracking is off. You can turn it on in Settings."}
+      </p>
+    );
+  }
   return (
     <dl className="kv">
       <dt>Average this week</dt>
@@ -176,7 +182,7 @@ async function ReportContent() {
             <h2 id="weight-heading" style={{ marginBottom: 12 }}>
               Weight (optional)
             </h2>
-            <WeightSummary weight={report.weight} unit={profile.weightUnit} />
+            <WeightSummary weight={report.weight} unit={profile.weightUnit} tracking={profile.weightTrackingEnabled} />
           </section>
         </div>
       </div>

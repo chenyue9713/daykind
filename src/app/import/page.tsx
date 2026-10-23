@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { PageHeader, PageSkeleton } from "@/components/ui";
-import { getRepository } from "@/lib/data";
+import { getSetUpRepository } from "@/lib/data";
 import { MAX_FILE_BYTES, MAX_FILE_LABEL } from "@/lib/import/limits";
 import { ImportClient } from "./import-client";
 
@@ -23,7 +23,7 @@ export default function ImportPage() {
 }
 
 async function ImportContent() {
-  const repo = await getRepository();
+  const repo = await getSetUpRepository();
   const profile = await repo.getProfile();
   return (
     <ImportClient

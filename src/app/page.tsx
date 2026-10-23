@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { GuidanceCard } from "@/components/guidance-card";
+import { TimezoneCheck } from "@/components/timezone-check";
 import { PageHeader, PageSkeleton, SampleBadge } from "@/components/ui";
 import { WeeklyProgressCard } from "@/components/weekly-progress";
 import { formatLocalDate, formatTime } from "@/lib/domain/dates";
@@ -13,6 +14,7 @@ import {
   intensityLabel,
 } from "@/lib/domain/format";
 import { goalSeconds } from "@/lib/domain/targets";
+import { formatDistance } from "@/lib/domain/units";
 import { loadToday } from "@/lib/views/loaders";
 
 export default function TodayPage() {
@@ -35,6 +37,7 @@ async function TodayContent() {
   return (
     <div className="stack">
       <p className="muted">{formatLocalDate(view.today, "long")}</p>
+      {view.isSample ? null : <TimezoneCheck timezone={profile.timezone} />}
 
       <section className="card stack-sm" aria-labelledby="due-heading">
         <div className="card-header">
@@ -112,6 +115,7 @@ async function TodayContent() {
                     <strong>{activityTypeLabel[a.type]}</strong>
                     <p className="small muted">
                       {formatTime(a.startedAt, a.timezone)} · {formatDuration(seconds)} {durationBasisLabel[basis]} ·{" "}
+                      {a.distanceMeters === null ? null : `${formatDistance(a.distanceMeters, profile.distanceUnit)} · `}
                       {intensityLabel[a.intensity]}
                     </p>
                   </div>

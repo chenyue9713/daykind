@@ -5,7 +5,7 @@ import "server-only";
 // multipart extraction, and the user-scoped repository from the shared contract.
 import { unstable_rethrow } from "next/navigation";
 
-import { getRepository } from "@/lib/data";
+import { getRepository, isSetUp } from "@/lib/data";
 import { MAX_FILE_BYTES, MAX_FILE_LABEL } from "./limits";
 import type { ImportDeps } from "./service";
 import type { ImportError } from "./types";
@@ -107,6 +107,12 @@ export async function readUploadForm(request: Request): Promise<UploadForm> {
 /** The signed-in user's store and timezone (shared contract: getRepository() is user-scoped). */
 export async function importDeps(): Promise<ImportDeps> {
   const repo = await getRepository();
+  if (!(await isSetUp(repo))) {
+    throw new RequestRejected(409, {
+      code: "conflict",
+      message: "Finish setting up DayKind (timezone and units) before importing. Nothing was saved.",
+    });
+  }
   const profile = await repo.getProfile();
   return { store: repo, profileTimezone: profile.timezone };
 }
