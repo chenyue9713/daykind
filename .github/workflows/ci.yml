@@ -1,0 +1,88 @@
+# Continuous integration for DayKind. See doc/ci.md.
+# Runs untrusted pull request code with a read-only token and no secrets, so it
+# uses `pull_request` (never `pull_request_target`).
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A newer push to the same pull request cancels the older run. Runs on main
+# are never cancelled, so every merge keeps a complete result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Node 22 LTS: the version DayKind is developed on. Keep it within
+  # package.json "engines" (Node 20 and 25 cannot run the tests).
+  NODE_VERSION: "22"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  check:
+    name: Check (typecheck, lint, tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      # Type check, lint, and Vitest, including the PGlite database tests that
+      # apply supabase/migrations to an in-process Postgres.
+      - run: npm run check
+
+  build-sample:
+    name: Build (sample mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DAYKIND_DATA_SOURCE: sample
+      SUPABASE_URL: ""
+      SUPABASE_PUBLISHABLE_KEY: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  # Build-time check only. The values below are deliberately fake and point at
+  # an unused local address: this proves the app compiles and prerenders in
+  # Supabase mode, not that sign-in or the database work.
+  build-supabase:
+    name: Build check (Supabase mode, fake config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DAYKIND_DATA_SOURCE: supabase
+      SUPABASE_URL: http://127.0.0.1:54321
+      SUPABASE_PUBLISHABLE_KEY: ci-fake-publishable-key-not-a-secret
+      DAYKIND_ALLOWED_EMAILS: ci@example.invalid
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run build
