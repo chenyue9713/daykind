@@ -6,7 +6,7 @@ A private, responsive web app for one person that keeps sleep, activity, and ank
 
 ## Local setup
 
-Requirements: Node.js 20.9 or later (developed on Node 22) and npm.
+Requirements: Node.js 22.13 or later on the 22 line, 24, or 26 and later (developed on Node 22), and npm. Node 20 and 25 are not supported: the test runner (Vitest 5) and lint tooling need these versions.
 
 ```bash
 npm install
