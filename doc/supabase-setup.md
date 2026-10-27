@@ -18,11 +18,16 @@ The migrations are in `supabase/migrations/` and must run in filename order:
 | `20261020120200_activities.sql` | `activities`, `import_files`, `activity_sources`, plus link and cleanup triggers |
 | `20261020120300_write_functions.sql` | Transactional write functions: `save_morning_check_in`, `save_evening_check_in`, `create_manual_activity`, `update_activity`, `import_confirmed_activities` |
 | `20261022120000_preferences.sql` | Onboarding state and target bounds; a guard that keeps targets already in effect unchanged; `save_preferences` and `save_goal_version` |
+| `20261026120000_reminders.sql` | `reminder_settings`, `push_subscriptions`, `reminder_occurrences`, `daykind_private.dispatch_keys`; `save_reminder_settings`, `save_push_subscription`, `request_test_reminder`, and the dispatcher functions `reminder_dispatch_users`, `reminder_plan`, `reminder_claim`, `reminder_record`, `reminder_drop_subscription` |
 
 Apply them in one of two ways:
 
 - **Supabase CLI:** run `supabase link --project-ref <ref>`, then `supabase db push`.
 - **Dashboard:** paste each file into **SQL Editor** and run them in order.
+
+### Upgrading a project that already has the preferences migration
+
+Apply only `20261026120000_reminders.sql`. It adds new tables and functions and changes no existing data. Reminders stay off until they are configured ([`reminders.md`](reminders.md)) and turned on in Settings.
 
 ### Upgrading a project that already has the first four migrations
 

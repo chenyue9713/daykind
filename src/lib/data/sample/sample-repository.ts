@@ -2,6 +2,7 @@ import { connection } from "next/server";
 
 import { isSuspectedDuplicate } from "@/lib/domain/activity";
 import { inRange, localDateOf } from "@/lib/domain/dates";
+import { DEFAULT_REMINDER_SETTINGS } from "@/lib/domain/reminders";
 import type { DateRange } from "@/lib/domain/types";
 import type { DayKindRepository } from "../repository";
 import { buildSampleDataset, type SampleDataset } from "./sample-data";
@@ -65,5 +66,12 @@ export function createSampleRepository({ userId, timezone }: Options): DayKindRe
     getSymptomEntry: async (id) => (await load()).data.symptoms.find((s) => s.id === id) ?? null,
     saveSymptomEntry: async () => NOT_PERSISTED,
     deleteSymptomEntry: async () => NOT_PERSISTED,
+    getReminderSettings: async () => DEFAULT_REMINDER_SETTINGS,
+    saveReminderSettings: async () => NOT_PERSISTED,
+    listReminderOccurrences: async () => [],
+    requestTestReminder: async () => NOT_PERSISTED,
+    getPushDevice: async () => null,
+    savePushDevice: async () => NOT_PERSISTED,
+    removePushDevice: async () => NOT_PERSISTED,
   };
 }

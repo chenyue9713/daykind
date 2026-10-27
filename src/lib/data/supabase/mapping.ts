@@ -6,6 +6,13 @@ import type { EveningCheckIn, MorningCheckIn, QuickActivityInput, SymptomInput }
 import { zonedTimeToInstant } from "@/lib/domain/dates";
 import type { TargetsInput } from "@/lib/domain/preferences";
 import type {
+  PushDevice,
+  PushSubscriptionInput,
+  ReminderOccurrence,
+  ReminderSettings,
+  ReminderSettingsInput,
+} from "@/lib/domain/reminders";
+import type {
   Activity,
   ActivitySource,
   EveningEntry,
@@ -314,5 +321,70 @@ export function preferencesPayload(input: PreferencesWrite, meta: WriteMeta) {
           ...targetValues(targets.values),
         }
       : null,
+  };
+}
+
+/** Postgres `time` arrives as "HH:MM:SS"; the app uses "HH:MM". */
+const hhmm = (v: unknown) => String(v).slice(0, 5);
+
+export function toReminderSettings(row: Row): ReminderSettings {
+  return {
+    deliveryEnabled: Boolean(row.delivery_enabled),
+    deliveryEnabledAt: instantOrNull(row.delivery_enabled_at),
+    channel: row.channel as ReminderSettings["channel"],
+    morningEnabled: Boolean(row.morning_enabled),
+    eveningEnabled: Boolean(row.evening_enabled),
+    followUpsEnabled: Boolean(row.follow_ups_enabled),
+    quietHoursEnabled: Boolean(row.quiet_hours_enabled),
+    quietStart: hhmm(row.quiet_start),
+    quietEnd: hhmm(row.quiet_end),
+    revision: Number(row.revision),
+  };
+}
+
+/** `meta.expectedRevision` is the settings revision shown, or null before the first save. */
+export function reminderSettingsPayload(input: ReminderSettingsInput, meta: WriteMeta) {
+  return {
+    request_id: meta.requestId,
+    expected_revision: meta.expectedRevision,
+    delivery_enabled: input.deliveryEnabled,
+    channel: input.channel,
+    morning_enabled: input.morningEnabled,
+    evening_enabled: input.eveningEnabled,
+    follow_ups_enabled: input.followUpsEnabled,
+    quiet_hours_enabled: input.quietHoursEnabled,
+    quiet_start: input.quietStart,
+    quiet_end: input.quietEnd,
+  };
+}
+
+export function toPushDevice(row: Row): PushDevice {
+  return { endpoint: str(row.endpoint), deviceLabel: strOrNull(row.device_label), registeredAt: instant(row.updated_at) };
+}
+
+/** A browser PushSubscription as JSON, plus a short device label. */
+export function pushSubscriptionPayload(input: PushSubscriptionInput, meta: WriteMeta) {
+  return {
+    request_id: meta.requestId,
+    endpoint: input.endpoint,
+    p256dh: input.p256dh,
+    auth: input.auth,
+    device_label: input.deviceLabel,
+  };
+}
+
+export function toReminderOccurrence(row: Row): ReminderOccurrence {
+  return {
+    id: str(row.id),
+    kind: row.kind as ReminderOccurrence["kind"],
+    stage: row.stage as ReminderOccurrence["stage"],
+    channel: (row.channel ?? null) as ReminderOccurrence["channel"],
+    localDate: date(row.local_date),
+    timezone: str(row.timezone),
+    scheduledAt: instant(row.scheduled_at),
+    status: row.status as ReminderOccurrence["status"],
+    statusReason: (row.status_reason ?? null) as ReminderOccurrence["statusReason"],
+    attempts: Number(row.attempts),
+    sentAt: instantOrNull(row.sent_at),
   };
 }

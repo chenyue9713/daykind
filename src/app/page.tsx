@@ -82,7 +82,12 @@ async function TodayContent() {
         <Link className="button button-block" href={morningDone ? "/check-in/evening" : "/check-in/morning"}>
           {morningDone ? "Start evening check-in" : "Start morning check-in"}
         </Link>
-        <p className="small muted">Reminders are not set up yet; check-ins appear here when due.</p>
+        <p className="small muted">
+          {view.remindersOn
+            ? "Reminders are on. Check-ins also appear here when due, whether or not a reminder arrives."
+            : "Reminders are off; check-ins appear here when due."}{" "}
+          <Link href="/settings#reminders-heading">Reminder settings</Link>
+        </p>
         {view.isSample ? null : (
           <p className="small muted">
             Saved check-ins appear on your other devices after they refresh this page.
