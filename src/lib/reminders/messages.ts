@@ -1,6 +1,6 @@
-// Notification text. Deliberately generic: no health values, notes, or
-// records, only which check-in is open and a link. Links point at pages that
-// require sign-in; they carry no login token.
+// Notification text for email and browser push. Deliberately generic: no
+// health values, notes, or records, only which check-in is open and a link.
+// Links point at pages that require sign-in; they carry no login token.
 import { formatLocalDate } from "@/lib/domain/dates";
 import type { ReminderKind, ReminderStage } from "@/lib/domain/reminders";
 import type { LocalDate } from "@/lib/domain/types";
@@ -58,4 +58,23 @@ export function reminderMessage({ kind, stage, localDate, appUrl }: ReminderMess
     `<p style="color:#666;font-size:13px">${escapeHtml(footer[0])} <a href="${escapeHtml(settings)}">Settings</a>.<br>${escapeHtml(footer[2])}</p>`,
   ].join("\n");
   return { subject, text, html, link };
+}
+
+/**
+ * The same generic text as a browser notification. The tag makes a
+ * follow-up replace that day's first reminder on the device instead of
+ * stacking under it.
+ */
+export function reminderPushPayload(input: ReminderMessageInput): { title: string; body: string; url: string; tag: string } {
+  const { subject, link } = reminderMessage(input);
+  const body =
+    input.kind === "test"
+      ? "This is the test you asked for. Check-in reminders will appear like this."
+      : `For ${formatLocalDate(input.localDate)}. Tap to open it in DayKind.`;
+  return {
+    title: subject.replace(/^Your DayKind /, "DayKind: ").replace(/^Reminder: your DayKind /, "DayKind: "),
+    body,
+    url: link,
+    tag: input.kind === "test" ? "daykind-test" : `daykind-${input.kind}-${input.localDate}`,
+  };
 }

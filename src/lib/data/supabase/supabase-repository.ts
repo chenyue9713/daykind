@@ -21,6 +21,7 @@ import {
   importPayload,
   morningPayload,
   preferencesPayload,
+  pushSubscriptionPayload,
   reminderSettingsPayload,
   symptomPayload,
   targetsPayload,
@@ -29,6 +30,7 @@ import {
   toEveningEntry,
   toGoalVersion,
   toProfile,
+  toPushDevice,
   toReminderOccurrence,
   toReminderSettings,
   toSleepEntry,
@@ -375,8 +377,8 @@ export function createSupabaseRepository({ client, userId }: Options): DayKindRe
       );
       return rows.map(toReminderOccurrence);
     },
-    async requestTestReminder(meta) {
-      const { data, error } = await client.rpc("request_test_reminder", { p: { request_id: meta.requestId } });
+    async requestTestReminder(channel, meta) {
+      const { data, error } = await client.rpc("request_test_reminder", { p: { request_id: meta.requestId, channel } });
       if (error) {
         logError("request_test_reminder", error);
         return { status: "failed", reason: SAVE_FAILED };
@@ -384,7 +386,20 @@ export function createSupabaseRepository({ client, userId }: Options): DayKindRe
       const r = data as RpcResult;
       if (r.status === "saved") return { status: "saved", savedAt: new Date().toISOString(), record: toReminderOccurrence(r.record!) };
       if (r.status === "rate_limited") return { status: "conflict", reason: r.reason ?? "Too many test notifications." };
-      return { status: "not_found", reason: r.reason ?? "Your account could not be found." };
+      return { status: r.status === "invalid" ? "failed" : "not_found", reason: r.reason ?? "Your account could not be found." };
+    },
+    async getPushDevice() {
+      const rows = await select("push device", client.from("push_subscriptions").select("endpoint, device_label, updated_at").eq("user_id", userId));
+      return rows[0] ? toPushDevice(rows[0]) : null;
+    },
+    savePushDevice: (input, meta) => rpc("save_push_subscription", pushSubscriptionPayload(input, meta), toPushDevice),
+    async removePushDevice(endpoint) {
+      const { error } = await client.from("push_subscriptions").delete().eq("user_id", userId).eq("endpoint", endpoint);
+      if (error) {
+        logError("delete push subscription", error);
+        return { status: "failed", reason: "The server could not update this. Try again." };
+      }
+      return { status: "saved", savedAt: new Date().toISOString(), record: null };
     },
   };
 }

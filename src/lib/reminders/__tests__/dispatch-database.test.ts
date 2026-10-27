@@ -1,8 +1,8 @@
 // Reminder dispatch against the real migrations in an in-process Postgres
 // (PGlite), with a fake email sender and an injected clock. Covers disabled
 // delivery, completion suppression, follow-ups, quiet hours, DST, timezone
-// changes, lateness, retries, overlapping runs, test notifications, and
-// ownership of reminder records.
+// changes, lateness, retries, overlapping runs, test notifications, browser
+// push (one channel and one browser per user), and ownership of reminder records.
 import { createHash } from "node:crypto";
 
 import { beforeEach, describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ import { DEFAULT_REMINDER_SETTINGS, type ReminderSettingsInput } from "@/lib/dom
 import { createTestDb, type TestDb } from "@/lib/data/supabase/__tests__/pg-harness";
 import { runDispatch } from "../dispatcher";
 import type { EmailSender, OutgoingEmail, SendResult } from "../email";
+import type { PushPayload, PushResult, PushSender, PushTarget } from "../push";
 import { createDispatchStore, type DispatchStore, type RpcCall } from "../store";
 
 const KEY = "test-dispatch-key-0123456789abcdef-0123456789";
@@ -35,6 +36,8 @@ const ARG_TYPES: Record<string, string> = {
   p_claim: "uuid",
   p_outcome: "text",
   p_detail: "text",
+  p_channels: "text[]",
+  p_subscription: "uuid",
 };
 
 /** Calls a dispatcher function the way the app does: as `anon`, with no session. */
@@ -61,9 +64,24 @@ class FakeSender implements EmailSender {
   }
 }
 
+/** Records every push and answers from a queue of results (default: accepted). */
+class FakePushSender implements PushSender {
+  sent: { target: PushTarget; payload: PushPayload; key: string }[] = [];
+  queue: PushResult["outcome"][] = [];
+  async send(target: PushTarget, payload: PushPayload, key: string): Promise<PushResult> {
+    this.sent.push({ target, payload, key });
+    const outcome = this.queue.shift() ?? "sent";
+    if (outcome === "sent") return { outcome, messageId: "push_201" };
+    return { outcome, code: outcome === "gone" ? "http_410" : outcome === "transient" ? "http_503" : "http_400" };
+  }
+}
+
 const at = (iso: string) => new Date(iso);
+/** A run on a server that can send email only. */
 const dispatch = (sender: EmailSender, now: string, onlyId?: string) =>
-  runDispatch({ store, sender, appUrl: APP, now: at(now), onlyId });
+  runDispatch({ store, senders: { email: sender }, appUrl: APP, now: at(now), onlyId });
+const dispatchWith = (senders: { email?: EmailSender; push?: PushSender }, now: string, onlyId?: string) =>
+  runDispatch({ store, senders, appUrl: APP, now: at(now), onlyId });
 
 async function sql<T = Record<string, unknown>>(query: string, params: unknown[] = []) {
   return (await t.db.query<T>(query, params)).rows;
@@ -103,11 +121,11 @@ async function setUpUser(
     ),
   );
   expect(prefs.status).toBe("saved");
-  const input: ReminderSettingsInput = { ...DEFAULT_REMINDER_SETTINGS, emailEnabled: true, ...settings };
+  const input: ReminderSettingsInput = { ...DEFAULT_REMINDER_SETTINGS, deliveryEnabled: true, ...settings };
   const saved = await t.rpc(user, "save_reminder_settings", reminderSettingsPayload(input, { requestId: uuid(), expectedRevision: null }));
   expect(saved.status).toBe("saved");
-  if (input.emailEnabled) {
-    await sql("update public.reminder_settings set email_enabled_at = $2 where user_id = $1", [user, enabledAt]);
+  if (input.deliveryEnabled) {
+    await sql("update public.reminder_settings set delivery_enabled_at = $2 where user_id = $1", [user, enabledAt]);
   }
 }
 
@@ -138,7 +156,7 @@ beforeEach(async () => {
 // 2026-10-27 is a Tuesday; Los Angeles is on PDT (UTC-7) until 2026-11-01.
 describe("delivery opt-in", () => {
   it("plans and sends nothing until the user turns email on", async () => {
-    await setUpUser(A, "America/Los_Angeles", { emailEnabled: false });
+    await setUpUser(A, "America/Los_Angeles", { deliveryEnabled: false });
     const sender = new FakeSender();
     const summary = await dispatch(sender, "2026-10-27T17:05:00Z");
     expect(summary).toMatchObject({ users: 0, planned: 0, claimed: 0, sent: 0 });
@@ -161,7 +179,7 @@ describe("delivery opt-in", () => {
     await store.plan([
       { userId: A, kind: "morning", stage: "initial", localDate: "2026-10-27", timezone: "America/Los_Angeles", scheduledAt: "2026-10-27T17:00:00.000Z" },
     ]);
-    await sql("update public.reminder_settings set email_enabled = false, email_enabled_at = null where user_id = $1", [A]);
+    await sql("update public.reminder_settings set delivery_enabled = false, delivery_enabled_at = null where user_id = $1", [A]);
     const sender = new FakeSender();
     await dispatch(sender, "2026-10-27T17:00:00Z");
     expect(sender.sent).toEqual([]);
@@ -171,7 +189,7 @@ describe("delivery opt-in", () => {
   it("refuses dispatcher calls without the right key", async () => {
     const wrong = createDispatchStore(anonCall(t), "x".repeat(40));
     await expect(wrong.listUsers()).rejects.toThrow(/dispatch key not accepted/);
-    await expect(wrong.claim({ now: at("2026-10-27T17:00:00Z") })).rejects.toThrow(/dispatch key not accepted/);
+    await expect(wrong.claim({ channels: ["email"], now: at("2026-10-27T17:00:00Z") })).rejects.toThrow(/dispatch key not accepted/);
     await expect(createDispatchStore(anonCall(t), "").listUsers()).rejects.toThrow(/dispatch key not accepted/);
   });
 });
@@ -477,11 +495,11 @@ describe("concurrent runs", () => {
     await store.plan([
       { userId: A, kind: "morning", stage: "initial", localDate: "2026-10-27", timezone: "America/Los_Angeles", scheduledAt: "2026-10-27T17:00:00.000Z" },
     ]);
-    const [first] = await store.claim({ now: at("2026-10-27T17:00:00Z") });
+    const [first] = await store.claim({ channels: ["email"], now: at("2026-10-27T17:00:00Z") });
     expect(first).toBeDefined();
     // Within the five-minute lease nobody else can claim it.
-    expect(await store.claim({ now: at("2026-10-27T17:04:00Z") })).toEqual([]);
-    const [second] = await store.claim({ now: at("2026-10-27T17:06:00Z") });
+    expect(await store.claim({ channels: ["email"], now: at("2026-10-27T17:04:00Z") })).toEqual([]);
+    const [second] = await store.claim({ channels: ["email"], now: at("2026-10-27T17:06:00Z") });
     expect(second.id).toBe(first.id); // same occurrence, so the same provider idempotency key
     expect(await store.record(first, "sent", "late", at("2026-10-27T17:06:30Z"))).toBe("stale");
     expect(await store.record(second, "sent", "msg", at("2026-10-27T17:06:30Z"))).toBe("sent");
@@ -491,7 +509,7 @@ describe("concurrent runs", () => {
 
 describe("test notifications", () => {
   it("sends a requested test even when reminders are off, once per request", async () => {
-    await setUpUser(A, "America/Los_Angeles", { emailEnabled: false });
+    await setUpUser(A, "America/Los_Angeles", { deliveryEnabled: false });
     const request = uuid();
     const r = await t.rpc(A, "request_test_reminder", { request_id: request });
     expect(r.status).toBe("saved");
@@ -508,16 +526,151 @@ describe("test notifications", () => {
   });
 
   it("limits tests to five an hour", async () => {
-    await setUpUser(A, "America/Los_Angeles", { emailEnabled: false });
+    await setUpUser(A, "America/Los_Angeles", { deliveryEnabled: false });
     for (let i = 0; i < 5; i++) expect((await t.rpc(A, "request_test_reminder", { request_id: uuid() })).status).toBe("saved");
     expect((await t.rpc(A, "request_test_reminder", { request_id: uuid() })).status).toBe("rate_limited");
+  });
+});
+
+const SUBSCRIPTION = {
+  endpoint: "https://push.example.test/send/abc",
+  p256dh: "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM",
+  auth: "tBHItJI5svbpez7KI4CCXg",
+  device_label: "Chrome on Android",
+};
+
+async function registerBrowser(user: string, endpoint = SUBSCRIPTION.endpoint) {
+  const r = await t.rpc(user, "save_push_subscription", { ...SUBSCRIPTION, endpoint, request_id: uuid() });
+  expect(r.status).toBe("saved");
+}
+
+async function occurrenceChannels(user = A) {
+  return sql<{ channel: string | null; status: string; status_reason: string | null }>(
+    "select channel, status, status_reason from public.reminder_occurrences where user_id = $1 order by scheduled_at",
+    [user],
+  );
+}
+
+describe("browser push", () => {
+  it("sends to the registered browser only, with generic text and the same-site link", async () => {
+    await setUpUser(A, "America/Los_Angeles", { channel: "push", followUpsEnabled: false });
+    await registerBrowser(A);
+    const email = new FakeSender();
+    const push = new FakePushSender();
+    await dispatchWith({ email, push }, "2026-10-27T17:00:00Z");
+    expect(email.sent).toEqual([]);
+    expect(push.sent).toHaveLength(1);
+    const [{ target, payload, key }] = push.sent;
+    expect(target).toMatchObject({ endpoint: SUBSCRIPTION.endpoint, p256dh: SUBSCRIPTION.p256dh, auth: SUBSCRIPTION.auth });
+    expect(payload).toEqual({
+      title: "DayKind: morning check-in is ready",
+      body: "For Tue, Oct 27. Tap to open it in DayKind.",
+      url: `${APP}/check-in/morning?date=2026-10-27`,
+      tag: "daykind-morning-2026-10-27",
+    });
+    expect(await occurrenceChannels()).toEqual([{ channel: "push", status: "sent", status_reason: null }]);
+    expect(key).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("suppresses push reminders for completed check-ins like email ones", async () => {
+    await setUpUser(A, "America/Los_Angeles", { channel: "push" });
+    await registerBrowser(A);
+    await completeMorning(A, "2026-10-27");
+    const push = new FakePushSender();
+    await dispatchWith({ push }, "2026-10-27T18:00:00Z");
+    expect(push.sent).toEqual([]);
+  });
+
+  it("fails clearly when no browser is registered", async () => {
+    await setUpUser(A, "America/Los_Angeles", { channel: "push", followUpsEnabled: false });
+    const push = new FakePushSender();
+    await dispatchWith({ push }, "2026-10-27T17:00:00Z");
+    expect(push.sent).toEqual([]);
+    expect(await occurrenceChannels()).toEqual([{ channel: "push", status: "failed", status_reason: "no_device" }]);
+  });
+
+  it("forgets a browser the push service reports as gone", async () => {
+    await setUpUser(A, "America/Los_Angeles", { channel: "push" });
+    await registerBrowser(A);
+    const push = new FakePushSender();
+    push.queue = ["gone"];
+    await dispatchWith({ push }, "2026-10-27T17:00:00Z");
+    expect(await t.count("public.push_subscriptions")).toBe(0);
+    await dispatchWith({ push }, "2026-10-27T18:00:00Z");
+    expect(push.sent).toHaveLength(1);
+    expect(await occurrenceChannels()).toEqual([
+      { channel: "push", status: "failed", status_reason: "provider_rejected" },
+      { channel: "push", status: "failed", status_reason: "no_device" },
+    ]);
+  });
+
+  it("keeps one browser per user: registering another replaces it", async () => {
+    await setUpUser(A, "America/Los_Angeles", { channel: "push" });
+    await registerBrowser(A, "https://push.example.test/send/laptop");
+    await registerBrowser(A, "https://push.example.test/send/phone");
+    const rows = await sql<{ endpoint: string }>("select endpoint from public.push_subscriptions where user_id = $1", [A]);
+    expect(rows).toEqual([{ endpoint: "https://push.example.test/send/phone" }]);
+  });
+
+  it("closes reminders for a channel this server cannot send", async () => {
+    await setUpUser(A, "America/Los_Angeles", { channel: "push", followUpsEnabled: false });
+    await registerBrowser(A);
+    const email = new FakeSender();
+    await dispatch(email, "2026-10-27T17:00:00Z");
+    expect(email.sent).toEqual([]);
+    expect(await occurrenceChannels()).toEqual([{ channel: "push", status: "skipped", status_reason: "channel_unavailable" }]);
+  });
+
+  it("retries on the channel of the first attempt, even if the user switches", async () => {
+    await setUpUser(A, "America/Los_Angeles", { followUpsEnabled: false });
+    await registerBrowser(A);
+    const email = new FakeSender();
+    const push = new FakePushSender();
+    email.queue = ["transient"];
+    await dispatchWith({ email, push }, "2026-10-27T17:00:00Z");
+    await sql("update public.reminder_settings set channel = 'push' where user_id = $1", [A]);
+    await dispatchWith({ email, push }, "2026-10-27T17:02:00Z");
+    expect(email.sent).toHaveLength(2);
+    expect(push.sent).toEqual([]);
+  });
+
+  it("retries a transient push failure under the same topic key", async () => {
+    await setUpUser(A, "America/Los_Angeles", { channel: "push", followUpsEnabled: false });
+    await registerBrowser(A);
+    const push = new FakePushSender();
+    push.queue = ["transient"];
+    await dispatchWith({ push }, "2026-10-27T17:00:00Z");
+    await dispatchWith({ push }, "2026-10-27T17:02:00Z");
+    expect(push.sent.map((p) => p.key)).toEqual([push.sent[0].key, push.sent[0].key]);
+    expect(await occurrenceChannels()).toEqual([{ channel: "push", status: "sent", status_reason: null }]);
+  });
+
+  it("sends a test to the browser on request", async () => {
+    await setUpUser(A, "America/Los_Angeles", { deliveryEnabled: false });
+    await registerBrowser(A);
+    const r = await t.rpc(A, "request_test_reminder", { request_id: uuid(), channel: "push" });
+    const push = new FakePushSender();
+    await dispatchWith({ email: new FakeSender(), push }, new Date().toISOString(), String((r.record as { id: string }).id));
+    expect(push.sent.map((p) => p.payload.title)).toEqual(["DayKind test notification"]);
+  });
+
+  it("stores only valid subscriptions, owned by their user", async () => {
+    await setUpUser(A, "America/Los_Angeles");
+    await setUpUser(B, "America/Los_Angeles");
+    await registerBrowser(A);
+    const insecure = await t.rpc(B, "save_push_subscription", { ...SUBSCRIPTION, endpoint: "http://push.example.test/x", request_id: uuid() });
+    expect(insecure.status).toBe("invalid");
+    expect(await t.as(B, async () => (await t.db.query("select * from public.push_subscriptions")).rows)).toEqual([]);
+    await t.as(B, () => t.db.query("delete from public.push_subscriptions"));
+    expect(await t.count("public.push_subscriptions")).toBe(1);
+    await expect(t.as(null, () => t.db.query("select * from public.push_subscriptions"))).rejects.toThrow(/permission denied/);
   });
 });
 
 describe("ownership", () => {
   it("lets each user read only their own reminder records and write none directly", async () => {
     await setUpUser(A, "America/Los_Angeles");
-    await setUpUser(B, "America/Los_Angeles", { emailEnabled: false });
+    await setUpUser(B, "America/Los_Angeles", { deliveryEnabled: false });
     await dispatch(new FakeSender(), "2026-10-27T17:00:00Z");
 
     const seenByA = await t.as(A, async () => (await t.db.query("select id from public.reminder_occurrences")).rows);
@@ -539,8 +692,8 @@ describe("ownership", () => {
     const settingsSeenByB = await t.as(B, async () => (await t.db.query("select user_id from public.reminder_settings")).rows);
     expect(settingsSeenByB).toEqual([{ user_id: B }]);
     // B cannot change A's settings: the update matches no visible row.
-    await t.as(B, () => t.db.query("update public.reminder_settings set email_enabled = false, email_enabled_at = null where user_id = $1", [A]));
-    expect((await sql("select email_enabled from public.reminder_settings where user_id = $1", [A]))[0]).toEqual({ email_enabled: true });
+    await t.as(B, () => t.db.query("update public.reminder_settings set delivery_enabled = false, delivery_enabled_at = null where user_id = $1", [A]));
+    expect((await sql("select delivery_enabled from public.reminder_settings where user_id = $1", [A]))[0]).toEqual({ delivery_enabled: true });
   });
 
   it("keeps the dispatch keys and dispatcher internals out of reach of signed-in users", async () => {
@@ -553,7 +706,7 @@ describe("ownership", () => {
 
   it("rejects stale or duplicate settings saves", async () => {
     await setUpUser(A, "America/Los_Angeles");
-    const input = { ...DEFAULT_REMINDER_SETTINGS, emailEnabled: true };
+    const input = { ...DEFAULT_REMINDER_SETTINGS, deliveryEnabled: true };
     const stale = await t.rpc(A, "save_reminder_settings", reminderSettingsPayload(input, { requestId: uuid(), expectedRevision: null }));
     expect(stale.status).toBe("conflict");
     const request = uuid();
@@ -566,19 +719,19 @@ describe("ownership", () => {
     expect(bad.status).toBe("invalid");
   });
 
-  it("keeps email_enabled_at when delivery stays on and resets it when turned off and on again", async () => {
+  it("keeps delivery_enabled_at when delivery stays on and resets it when turned off and on again", async () => {
     await setUpUser(A, "America/Los_Angeles");
-    const read = async () => (await sql<{ revision: number; email_enabled_at: Date | null }>("select revision, email_enabled_at from public.reminder_settings where user_id = $1", [A]))[0];
+    const read = async () => (await sql<{ revision: number; delivery_enabled_at: Date | null }>("select revision, delivery_enabled_at from public.reminder_settings where user_id = $1", [A]))[0];
     const base = { ...DEFAULT_REMINDER_SETTINGS };
     let row = await read();
-    await t.rpc(A, "save_reminder_settings", reminderSettingsPayload({ ...base, emailEnabled: true, quietEnd: "07:30" }, { requestId: uuid(), expectedRevision: row.revision }));
+    await t.rpc(A, "save_reminder_settings", reminderSettingsPayload({ ...base, deliveryEnabled: true, quietEnd: "07:30" }, { requestId: uuid(), expectedRevision: row.revision }));
     const kept = await read();
-    expect(kept.email_enabled_at?.toISOString()).toBe("2026-10-27T07:00:00.000Z");
-    await t.rpc(A, "save_reminder_settings", reminderSettingsPayload({ ...base, emailEnabled: false }, { requestId: uuid(), expectedRevision: kept.revision }));
+    expect(kept.delivery_enabled_at?.toISOString()).toBe("2026-10-27T07:00:00.000Z");
+    await t.rpc(A, "save_reminder_settings", reminderSettingsPayload({ ...base, deliveryEnabled: false }, { requestId: uuid(), expectedRevision: kept.revision }));
     row = await read();
-    expect(row.email_enabled_at).toBeNull();
+    expect(row.delivery_enabled_at).toBeNull();
     const before = Date.now();
-    await t.rpc(A, "save_reminder_settings", reminderSettingsPayload({ ...base, emailEnabled: true }, { requestId: uuid(), expectedRevision: row.revision }));
-    expect((await read()).email_enabled_at!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+    await t.rpc(A, "save_reminder_settings", reminderSettingsPayload({ ...base, deliveryEnabled: true }, { requestId: uuid(), expectedRevision: row.revision }));
+    expect((await read()).delivery_enabled_at!.getTime()).toBeGreaterThanOrEqual(before - 1000);
   });
 });

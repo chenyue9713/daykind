@@ -70,5 +70,8 @@ export function createSampleRepository({ userId, timezone }: Options): DayKindRe
     saveReminderSettings: async () => NOT_PERSISTED,
     listReminderOccurrences: async () => [],
     requestTestReminder: async () => NOT_PERSISTED,
+    getPushDevice: async () => null,
+    savePushDevice: async () => NOT_PERSISTED,
+    removePushDevice: async () => NOT_PERSISTED,
   };
 }

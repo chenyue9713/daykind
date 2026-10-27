@@ -5,7 +5,14 @@
 import type { ActivityDraft, DuplicateProbe } from "@/lib/domain/activity";
 import type { EveningCheckIn, MorningCheckIn, SymptomInput } from "@/lib/domain/checkins";
 import type { PreferencesInput, TargetsInput } from "@/lib/domain/preferences";
-import type { ReminderOccurrence, ReminderSettings, ReminderSettingsInput } from "@/lib/domain/reminders";
+import type {
+  PushDevice,
+  PushSubscriptionInput,
+  ReminderChannel,
+  ReminderOccurrence,
+  ReminderSettings,
+  ReminderSettingsInput,
+} from "@/lib/domain/reminders";
 import type {
   Activity,
   ActivitySource,
@@ -219,8 +226,14 @@ export interface DayKindRepository extends ActivityStore {
   /** The most recent reminder occurrences, newest first, for delivery status. */
   listReminderOccurrences(limit: number): Promise<ReminderOccurrence[]>;
   /**
-   * Records a test notification for the dispatcher to send now. Limited to
-   * five per hour ("conflict" with a reason when over the limit).
+   * Records a test notification on `channel` for the dispatcher to send now.
+   * Limited to five per hour ("conflict" with a reason when over the limit).
    */
-  requestTestReminder(meta: WriteMeta): Promise<MutationResult<ReminderOccurrence>>;
+  requestTestReminder(channel: ReminderChannel, meta: WriteMeta): Promise<MutationResult<ReminderOccurrence>>;
+  /** The browser registered for push notifications, if any. */
+  getPushDevice(): Promise<PushDevice | null>;
+  /** Registers this browser for push, replacing any other browser (one device per user). */
+  savePushDevice(input: PushSubscriptionInput, meta: WriteMeta): Promise<MutationResult<PushDevice>>;
+  /** Unregisters the browser with this endpoint; nothing happens if another browser is registered now. */
+  removePushDevice(endpoint: string): Promise<MutationResult<null>>;
 }

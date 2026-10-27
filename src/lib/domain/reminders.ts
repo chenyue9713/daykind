@@ -8,11 +8,14 @@ import type { Instant, LocalDate } from "./types";
 
 export type ReminderKind = "morning" | "evening";
 export type ReminderStage = "initial" | "follow_up";
+/** One channel per user, so the same reminder never arrives twice. */
+export type ReminderChannel = "email" | "push";
 
 export interface ReminderSettings {
-  /** The user turned email delivery on. Nothing is sent before this. */
-  emailEnabled: boolean;
-  emailEnabledAt: Instant | null;
+  /** The user turned delivery on. Nothing is sent before this. */
+  deliveryEnabled: boolean;
+  deliveryEnabledAt: Instant | null;
+  channel: ReminderChannel;
   morningEnabled: boolean;
   eveningEnabled: boolean;
   followUpsEnabled: boolean;
@@ -24,11 +27,12 @@ export interface ReminderSettings {
   revision: number | null;
 }
 
-export type ReminderSettingsInput = Omit<ReminderSettings, "emailEnabledAt" | "revision">;
+export type ReminderSettingsInput = Omit<ReminderSettings, "deliveryEnabledAt" | "revision">;
 
 export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
-  emailEnabled: false,
-  emailEnabledAt: null,
+  deliveryEnabled: false,
+  deliveryEnabledAt: null,
+  channel: "email",
   morningEnabled: true,
   eveningEnabled: true,
   followUpsEnabled: true,
@@ -69,7 +73,7 @@ export function slotInstant(kind: ReminderKind, stage: ReminderStage, localDate:
 
 export interface PlanningUser {
   timezone: string;
-  emailEnabledAt: Instant | null;
+  deliveryEnabledAt: Instant | null;
   morningEnabled: boolean;
   eveningEnabled: boolean;
   followUpsEnabled: boolean;
@@ -81,8 +85,8 @@ export interface PlanningUser {
  * lookback. Recording a slot is idempotent, so overlapping runs are harmless.
  */
 export function dueSlots(user: PlanningUser, now: Date): ReminderSlot[] {
-  if (!user.emailEnabledAt) return [];
-  const enabledAt = new Date(user.emailEnabledAt).getTime();
+  if (!user.deliveryEnabledAt) return [];
+  const enabledAt = new Date(user.deliveryEnabledAt).getTime();
   const nowMs = now.getTime();
   const today = localDateOf(now, user.timezone);
   const kinds = (["morning", "evening"] as const).filter((k) => (k === "morning" ? user.morningEnabled : user.eveningEnabled));
@@ -138,11 +142,14 @@ export function validateReminderSettings(raw: RawForm): Validation<ReminderSetti
   if (!errors.quietStart && !errors.quietEnd && quietStart === quietEnd) {
     errors.quietEnd = "Quiet hours need different start and end times.";
   }
+  const channel = raw.channel === "email" || raw.channel === "push" ? raw.channel : null;
+  if (!channel) errors.channel = "Choose email or browser notifications.";
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   return {
     ok: true,
     value: {
-      emailEnabled: checked(raw.emailEnabled),
+      deliveryEnabled: checked(raw.deliveryEnabled),
+      channel: channel!,
       morningEnabled: checked(raw.morningEnabled),
       eveningEnabled: checked(raw.eveningEnabled),
       followUpsEnabled: checked(raw.followUpsEnabled),
@@ -151,6 +158,68 @@ export function validateReminderSettings(raw: RawForm): Validation<ReminderSetti
       quietEnd,
     },
   };
+}
+
+// --- Browser push ---
+
+/** The one browser registered for push notifications. */
+export interface PushDevice {
+  /** The push service URL for that browser; compared with this browser's own subscription. */
+  endpoint: string;
+  deviceLabel: string | null;
+  registeredAt: Instant;
+}
+
+export interface PushSubscriptionInput {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  deviceLabel: string | null;
+}
+
+const BASE64URL = /^[A-Za-z0-9_-]+=*$/;
+
+/** Checks a PushSubscription's JSON from the browser before it is stored. */
+export function validatePushSubscription(value: unknown, deviceLabel: unknown): PushSubscriptionInput | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { endpoint, keys } = value as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
+  const p256dh = keys?.p256dh;
+  const auth = keys?.auth;
+  if (typeof endpoint !== "string" || endpoint.length > 1000) return null;
+  try {
+    if (new URL(endpoint).protocol !== "https:") return null;
+  } catch {
+    return null;
+  }
+  if (typeof p256dh !== "string" || p256dh.length > 200 || !BASE64URL.test(p256dh)) return null;
+  if (typeof auth !== "string" || auth.length > 100 || !BASE64URL.test(auth)) return null;
+  const label = typeof deviceLabel === "string" ? deviceLabel.replace(/[^\w .,()/-]/g, "").slice(0, 60) || null : null;
+  return { endpoint, p256dh, auth, deviceLabel: label };
+}
+
+/** "Chrome on Android" and similar, from a user-agent string. Display only. */
+export function describeDevice(userAgent: string): string {
+  const browser = /Edg\//.test(userAgent)
+    ? "Edge"
+    : /Firefox\//.test(userAgent)
+      ? "Firefox"
+      : /Chrome\//.test(userAgent)
+        ? "Chrome"
+        : /Safari\//.test(userAgent)
+          ? "Safari"
+          : "Browser";
+  const os = /Android/.test(userAgent)
+    ? "Android"
+    : /iPhone|iPad/.test(userAgent)
+      ? "iOS"
+      : /Mac OS X/.test(userAgent)
+        ? "macOS"
+        : /Windows/.test(userAgent)
+          ? "Windows"
+          : /Linux|CrOS/.test(userAgent)
+            ? "Linux"
+            : "this device";
+  return `${browser} on ${os}`;
 }
 
 // --- Delivery status ---
@@ -167,6 +236,8 @@ export type OccurrenceReason =
   | "timezone_changed"
   | "timezone_unconfirmed"
   | "no_address"
+  | "no_device"
+  | "channel_unavailable"
   | "retries_exhausted"
   | "provider_rejected";
 
@@ -174,6 +245,8 @@ export interface ReminderOccurrence {
   id: string;
   kind: ReminderKind | "test";
   stage: ReminderStage;
+  /** Set when the send was claimed (or when a test was requested). */
+  channel: ReminderChannel | null;
   localDate: LocalDate;
   timezone: string;
   scheduledAt: Instant;
@@ -190,7 +263,7 @@ export const occurrenceLabel = (o: Pick<ReminderOccurrence, "kind" | "stage">): 
 
 const reasonText: Record<OccurrenceReason, string> = {
   completed: "Not sent: the check-in was already done",
-  delivery_off: "Not sent: email reminders were off",
+  delivery_off: "Not sent: reminders were off",
   reminder_off: "Not sent: this reminder was turned off",
   follow_ups_off: "Not sent: follow-ups were off",
   quiet_hours: "Not sent: quiet hours",
@@ -198,15 +271,17 @@ const reasonText: Record<OccurrenceReason, string> = {
   timezone_changed: "Not sent: your timezone changed",
   timezone_unconfirmed: "Not sent: timezone not confirmed",
   no_address: "Failed: no email address on the account",
+  no_device: "Failed: no browser registered for notifications",
+  channel_unavailable: "Not sent: this channel isn't set up on the server",
   retries_exhausted: "Failed after retries",
-  provider_rejected: "Failed: the mail service refused it",
+  provider_rejected: "Failed: the delivery service refused it",
 };
 
-/** "Delivered" here means accepted by the mail service, never "read". */
+/** "Delivered" here means accepted by the mail or push service, never "seen". */
 export function occurrenceStatusText(o: ReminderOccurrence): string {
   switch (o.status) {
     case "sent":
-      return "Accepted by the mail service";
+      return o.channel === "push" ? "Accepted by the push service" : "Accepted by the mail service";
     case "pending":
       return o.attempts > 0 ? "Retrying soon" : "Waiting to send";
     case "sending":

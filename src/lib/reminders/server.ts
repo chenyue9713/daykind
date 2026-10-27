@@ -6,6 +6,7 @@ import { supabaseConfig } from "@/lib/supabase/config";
 import { reminderEnv, type ReminderEnv } from "./config";
 import { runDispatch, type DispatchSummary } from "./dispatcher";
 import { createResendSender } from "./email";
+import { createWebPushSender } from "./push";
 import { createDispatchStore } from "./store";
 
 /**
@@ -23,8 +24,13 @@ export async function dispatchReminders(env: ReminderEnv, options: { onlyId?: st
     if (error) throw new Error(`${name} failed (code ${error.code || "unknown"})`);
     return data;
   }, env.dispatchSecret);
-  const sender = createResendSender({ apiKey: env.resendApiKey, from: env.emailFrom });
-  return runDispatch({ store, sender, appUrl: env.appUrl, onlyId: options.onlyId });
+  const senders = {
+    email: env.email ? createResendSender({ apiKey: env.email.resendApiKey, from: env.email.emailFrom }) : null,
+    push: env.push
+      ? createWebPushSender({ publicKey: env.push.vapidPublicKey, privateKey: env.push.vapidPrivateKey, subject: env.push.vapidSubject })
+      : null,
+  };
+  return runDispatch({ store, senders, appUrl: env.appUrl, onlyId: options.onlyId });
 }
 
 export { isAuthorizedDispatch } from "./auth";

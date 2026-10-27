@@ -45,7 +45,7 @@ export async function loadToday() {
     isSample: repo.isSample,
     profile,
     today,
-    emailRemindersOn: reminderSettings.emailEnabled && reminderEnv().configured,
+    remindersOn: reminderSettings.deliveryEnabled && reminderEnv().channels.includes(reminderSettings.channel),
     sleepToday,
     eveningToday,
     activitiesToday: weekActivities.filter((a) => a.localDate === today && a.canonicalStatus === "canonical"),
@@ -162,13 +162,15 @@ export const REMINDER_STATUS_LIMIT = 12;
 
 export async function loadSettings() {
   const repo = await getSetUpRepository();
-  const [profile, today, goalVersions, reminderSettings, reminderOccurrences] = await Promise.all([
+  const [profile, today, goalVersions, reminderSettings, reminderOccurrences, pushDevice] = await Promise.all([
     repo.getProfile(),
     repo.getToday(),
     repo.getGoalVersions(),
     repo.getReminderSettings(),
     repo.listReminderOccurrences(REMINDER_STATUS_LIMIT),
+    repo.getPushDevice(),
   ]);
+  const env = reminderEnv();
   const user = await getCurrentUser();
   return {
     isSample: repo.isSample,
@@ -181,8 +183,11 @@ export async function loadSettings() {
     reminders: {
       settings: reminderSettings,
       occurrences: reminderOccurrences,
-      /** Whether this server can send email; the values themselves never leave the server. */
-      deliveryConfigured: reminderEnv().configured,
+      pushDevice,
+      /** Channels this server can send. Secrets never leave the server. */
+      channels: env.channels,
+      /** Public by design: the browser needs it to subscribe. */
+      vapidPublicKey: env.configured ? (env.env.push?.vapidPublicKey ?? null) : null,
     },
   };
 }

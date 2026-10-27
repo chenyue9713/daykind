@@ -3,17 +3,20 @@
 import { useActionState, useState, useTransition, type FormEvent } from "react";
 
 import { EditTarget, FieldError, SaveStatus, initialFormState, useRequestId } from "@/app/check-in/form-parts";
-import { followUpsInQuietHours, type ReminderSettings } from "@/lib/domain/reminders";
+import { followUpsInQuietHours, type ReminderChannel, type ReminderSettings } from "@/lib/domain/reminders";
 import { saveReminderSettings, sendTestReminder } from "./reminder-actions";
 
 export function RemindersForm({
   settings,
   email,
   timezone,
+  pushDeviceLabel,
 }: {
   settings: ReminderSettings;
   email: string | null;
   timezone: string;
+  /** The registered browser, if any. */
+  pushDeviceLabel: string | null;
 }) {
   const [state, formAction] = useActionState(saveReminderSettings, initialFormState);
   const [pending, startTransition] = useTransition();
@@ -40,13 +43,29 @@ export function RemindersForm({
       <fieldset className="stack-sm">
         <legend>Delivery</legend>
         <label className="choice">
-          <input type="checkbox" name="emailEnabled" defaultChecked={settings.emailEnabled} />
-          Email me check-in reminders
+          <input type="checkbox" name="deliveryEnabled" defaultChecked={settings.deliveryEnabled} />
+          Send me check-in reminders
         </label>
         <p className="field-hint">
-          {email ? `Sent to ${email}. ` : null}Nothing is sent until you turn this on. Emails say only which check-in
-          is open and link to DayKind, where you sign in as usual.
+          Nothing is sent until you turn this on. Reminders say only which check-in is open and link to DayKind,
+          where you sign in as usual.
         </p>
+      </fieldset>
+
+      <fieldset className="stack-sm">
+        <legend>Send them by</legend>
+        <div className="choice-group">
+          <label className="choice">
+            <input type="radio" name="channel" value="email" defaultChecked={settings.channel === "email"} />
+            Email{email ? ` to ${email}` : null}
+          </label>
+          <label className="choice">
+            <input type="radio" name="channel" value="push" defaultChecked={settings.channel === "push"} />
+            Browser notification on {pushDeviceLabel ?? "the browser you register below"}
+          </label>
+        </div>
+        <p className="field-hint">One channel and one browser, so the same reminder never arrives twice.</p>
+        <FieldError errors={state.errors} name="channel" />
       </fieldset>
 
       <fieldset className="stack-sm">
@@ -128,7 +147,15 @@ export function RemindersForm({
   );
 }
 
-export function TestNotification({ disabled }: { disabled: boolean }) {
+export function TestNotification({
+  channel,
+  label,
+  disabled,
+}: {
+  channel: ReminderChannel;
+  label: string;
+  disabled: boolean;
+}) {
   const [state, formAction] = useActionState(sendTestReminder, initialFormState);
   const [pending, startTransition] = useTransition();
   const nextRequestId = useRequestId();
@@ -137,6 +164,7 @@ export function TestNotification({ disabled }: { disabled: boolean }) {
     event.preventDefault();
     const data = new FormData();
     data.set("requestId", nextRequestId(state.status));
+    data.set("channel", channel);
     startTransition(() => formAction(data));
   };
 
@@ -151,7 +179,7 @@ export function TestNotification({ disabled }: { disabled: boolean }) {
       )}
       <div className="row">
         <button className="button button-secondary" type="submit" disabled={pending || disabled}>
-          Send a test email
+          {label}
         </button>
       </div>
     </form>

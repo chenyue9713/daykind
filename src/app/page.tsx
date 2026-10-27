@@ -83,9 +83,9 @@ async function TodayContent() {
           {morningDone ? "Start evening check-in" : "Start morning check-in"}
         </Link>
         <p className="small muted">
-          {view.emailRemindersOn
-            ? "Email reminders are on. Check-ins also appear here when due, whether or not an email arrives."
-            : "Email reminders are off; check-ins appear here when due."}{" "}
+          {view.remindersOn
+            ? "Reminders are on. Check-ins also appear here when due, whether or not a reminder arrives."
+            : "Reminders are off; check-ins appear here when due."}{" "}
           <Link href="/settings#reminders-heading">Reminder settings</Link>
         </p>
         {view.isSample ? null : (

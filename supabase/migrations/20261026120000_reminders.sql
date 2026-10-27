@@ -1,9 +1,11 @@
 -- DayKind: check-in reminders (PRD FR07).
--- Adds per-user reminder settings, persisted reminder occurrences, and the
--- functions the server-side dispatcher uses to plan, claim, and record sends.
+-- Adds per-user reminder settings, browser push subscriptions, persisted
+-- reminder occurrences, and the functions the server-side dispatcher uses to
+-- plan, claim, and record sends. Delivery is by email or browser push: one
+-- channel per user, and one browser per user, so alerts are not duplicated.
 --
 -- Ownership: the signed-in user may read and change their own settings and
--- read their own occurrences. Occurrences are written only by the dispatcher
+-- push subscription and read their own occurrences. Occurrences are written only by the dispatcher
 -- functions below, which require a dispatch key whose SHA-256 hash is stored
 -- in daykind_private.dispatch_keys (see doc/reminders.md). No service-role key
 -- is involved. Earlier migrations are not modified.
@@ -12,14 +14,15 @@
 -- Settings
 -- ---------------------------------------------------------------------------
 
--- One row per user, created on first save. Email delivery is off until the
--- user turns it on; email_enabled_at records when, so reminders scheduled
--- before that moment are never sent.
+-- One row per user, created on first save. Delivery is off until the user
+-- turns it on; delivery_enabled_at records when, so reminders scheduled
+-- before that moment are never sent. `channel` is the one channel used.
 create table public.reminder_settings (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null unique default auth.uid() references auth.users (id) on delete cascade,
-  email_enabled boolean not null default false,
-  email_enabled_at timestamptz,
+  delivery_enabled boolean not null default false,
+  delivery_enabled_at timestamptz,
+  channel text not null default 'email' check (channel in ('email', 'push')),
   morning_enabled boolean not null default true,
   evening_enabled boolean not null default true,
   follow_ups_enabled boolean not null default true,
@@ -30,7 +33,7 @@ create table public.reminder_settings (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   revision integer not null default 1 check (revision >= 1),
-  check (email_enabled = (email_enabled_at is not null)),
+  check (delivery_enabled = (delivery_enabled_at is not null)),
   check (quiet_start <> quiet_end),
   check (extract(second from quiet_start) = 0 and extract(second from quiet_end) = 0)
 );
@@ -64,14 +67,16 @@ create table public.reminder_occurrences (
   -- The check-in date: the waking date for morning, the local date for evening.
   local_date date not null,
   stage text not null check (stage in ('initial', 'follow_up')),
-  channel text not null default 'email' check (channel in ('email')),
+  -- The channel used: chosen by the user for a test, set at claim time otherwise.
+  channel text check (channel in ('email', 'push')),
   timezone text not null check (daykind_private.is_valid_timezone(timezone)),
   scheduled_at timestamptz not null,
   status text not null default 'pending'
     check (status in ('pending', 'sending', 'sent', 'suppressed', 'skipped', 'failed')),
   status_reason text check (status_reason in (
     'completed', 'delivery_off', 'reminder_off', 'follow_ups_off', 'quiet_hours', 'too_late',
-    'timezone_changed', 'timezone_unconfirmed', 'no_address', 'retries_exhausted', 'provider_rejected'
+    'timezone_changed', 'timezone_unconfirmed', 'no_address', 'no_device', 'channel_unavailable',
+    'retries_exhausted', 'provider_rejected'
   )),
   -- Delivery attempts made: the first send plus at most three retries.
   attempts smallint not null default 0 check (attempts between 0 and 4),
@@ -111,12 +116,43 @@ revoke all on table public.reminder_occurrences from anon, public, authenticated
 grant select on table public.reminder_occurrences to authenticated;
 
 -- ---------------------------------------------------------------------------
+-- Browser push subscriptions
+-- ---------------------------------------------------------------------------
+
+-- The browser that receives push notifications. At most one per user (PRD:
+-- one primary device), so saving a new browser replaces the previous one.
+-- endpoint, p256dh, and auth come from the browser's PushSubscription; they
+-- let the push service deliver to that browser and are not shown in the app.
+create table public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null unique default auth.uid() references auth.users (id) on delete cascade,
+  endpoint text not null check (endpoint ~ '^https://' and char_length(endpoint) <= 1000),
+  p256dh text not null check (p256dh ~ '^[A-Za-z0-9_-]+=*$' and char_length(p256dh) <= 200),
+  auth text not null check (auth ~ '^[A-Za-z0-9_-]+=*$' and char_length(auth) <= 100),
+  -- A short label such as "Chrome on Android", for Settings.
+  device_label text check (char_length(device_label) <= 60),
+  last_request_id uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  revision integer not null default 1 check (revision >= 1)
+);
+
+create trigger push_subscriptions_touch before update on public.push_subscriptions
+  for each row execute function daykind_private.touch_row();
+
+alter table public.push_subscriptions enable row level security;
+create policy push_subscriptions_owner on public.push_subscriptions for all to authenticated
+  using (daykind_private.owns_row(user_id)) with check (daykind_private.owns_row(user_id));
+revoke all on table public.push_subscriptions from anon, public;
+grant select, insert, update, delete on table public.push_subscriptions to authenticated;
+
+-- ---------------------------------------------------------------------------
 -- Settings writes
 -- ---------------------------------------------------------------------------
 
 -- Saves reminder settings. p: {request_id, expected_revision (null to create),
--- email_enabled, morning_enabled, evening_enabled, follow_ups_enabled,
--- quiet_hours_enabled, quiet_start "HH:MM", quiet_end "HH:MM"}.
+-- delivery_enabled, channel (email | push), morning_enabled, evening_enabled,
+-- follow_ups_enabled, quiet_hours_enabled, quiet_start "HH:MM", quiet_end "HH:MM"}.
 -- Returns {status: saved | conflict | not_found | invalid, record?, reason?}.
 create function public.save_reminder_settings(p jsonb)
 returns jsonb
@@ -128,7 +164,8 @@ declare
   v_user uuid := (select auth.uid());
   v_request uuid := (p ->> 'request_id')::uuid;
   v_expected integer := (p ->> 'expected_revision')::integer;
-  v_email boolean := coalesce((p ->> 'email_enabled')::boolean, false);
+  v_on boolean := coalesce((p ->> 'delivery_enabled')::boolean, false);
+  v_channel text := coalesce(p ->> 'channel', 'email');
   v_start time;
   v_end time;
   v_row public.reminder_settings;
@@ -146,6 +183,9 @@ begin
   if v_start is null or v_end is null or v_start = v_end then
     return jsonb_build_object('status', 'invalid', 'reason', 'Quiet hours need different start and end times.');
   end if;
+  if v_channel not in ('email', 'push') then
+    return jsonb_build_object('status', 'invalid', 'reason', 'Choose email or browser notifications.');
+  end if;
 
   select * into v_row from public.reminder_settings where user_id = v_user for update;
   v_exists := found;
@@ -160,10 +200,10 @@ begin
   begin
     if not v_exists then
       insert into public.reminder_settings (
-        email_enabled, email_enabled_at, morning_enabled, evening_enabled, follow_ups_enabled,
+        delivery_enabled, delivery_enabled_at, channel, morning_enabled, evening_enabled, follow_ups_enabled,
         quiet_hours_enabled, quiet_start, quiet_end, last_request_id
       ) values (
-        v_email, case when v_email then now() end,
+        v_on, case when v_on then now() end, v_channel,
         coalesce((p ->> 'morning_enabled')::boolean, true),
         coalesce((p ->> 'evening_enabled')::boolean, true),
         coalesce((p ->> 'follow_ups_enabled')::boolean, true),
@@ -173,12 +213,13 @@ begin
       returning * into v_row;
     else
       update public.reminder_settings set
-        email_enabled = v_email,
+        delivery_enabled = v_on,
         -- Turning delivery on starts from now; earlier reminders are never sent.
-        email_enabled_at = case
-          when not v_email then null
-          when email_enabled then email_enabled_at
+        delivery_enabled_at = case
+          when not v_on then null
+          when delivery_enabled then delivery_enabled_at
           else now() end,
+        channel = v_channel,
         morning_enabled = coalesce((p ->> 'morning_enabled')::boolean, true),
         evening_enabled = coalesce((p ->> 'evening_enabled')::boolean, true),
         follow_ups_enabled = coalesce((p ->> 'follow_ups_enabled')::boolean, true),
@@ -198,8 +239,9 @@ end;
 $$;
 
 -- A test notification from Settings, sent by the dispatcher straight away.
--- An explicit request, so it does not depend on email_enabled. At most five
--- per hour. p: {request_id}. Returns {status: saved | rate_limited | not_found, record?}.
+-- An explicit request, so it does not depend on delivery_enabled. At most five
+-- per hour. p: {request_id, channel (email | push)}.
+-- Returns {status: saved | rate_limited | not_found | invalid, record?}.
 create function public.request_test_reminder(p jsonb)
 returns jsonb
 language plpgsql
@@ -209,6 +251,7 @@ as $$
 declare
   v_user uuid := (select auth.uid());
   v_request uuid := (p ->> 'request_id')::uuid;
+  v_channel text := coalesce(p ->> 'channel', 'email');
   v_tz text;
   v_row public.reminder_occurrences;
 begin
@@ -219,6 +262,9 @@ begin
   if found then
     return jsonb_build_object('status', 'saved', 'record', to_jsonb(v_row));
   end if;
+  if v_channel not in ('email', 'push') then
+    return jsonb_build_object('status', 'invalid', 'reason', 'Choose email or browser notifications.');
+  end if;
   if (select count(*) from public.reminder_occurrences
        where user_id = v_user and kind = 'test' and created_at > now() - interval '1 hour') >= 5 then
     return jsonb_build_object('status', 'rate_limited', 'reason',
@@ -226,15 +272,52 @@ begin
   end if;
   v_tz := coalesce((select timezone from public.profiles where user_id = v_user), 'America/Los_Angeles');
   insert into public.reminder_occurrences (
-    user_id, kind, local_date, stage, timezone, scheduled_at, next_attempt_at, request_id
-  ) values (v_user, 'test', (now() at time zone v_tz)::date, 'initial', v_tz, now(), now(), v_request)
+    user_id, kind, local_date, stage, channel, timezone, scheduled_at, next_attempt_at, request_id
+  ) values (v_user, 'test', (now() at time zone v_tz)::date, 'initial', v_channel, v_tz, now(), now(), v_request)
   returning * into v_row;
   return jsonb_build_object('status', 'saved', 'record', to_jsonb(v_row));
 end;
 $$;
 
-revoke all on function public.save_reminder_settings(jsonb), public.request_test_reminder(jsonb) from public, anon;
-grant execute on function public.save_reminder_settings(jsonb), public.request_test_reminder(jsonb) to authenticated;
+-- Registers this browser for push notifications, replacing any other browser
+-- of the same user. p: {request_id, endpoint, p256dh, auth, device_label}.
+-- Returns {status: saved | invalid | not_found, record?}.
+create function public.save_push_subscription(p jsonb)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_user uuid := (select auth.uid());
+  v_row public.push_subscriptions;
+begin
+  if v_user is null or not daykind_private.is_allowed() then
+    return jsonb_build_object('status', 'not_found', 'reason', 'Your account could not be found. Reload the page.');
+  end if;
+  begin
+    insert into public.push_subscriptions (endpoint, p256dh, auth, device_label, last_request_id)
+    values (p ->> 'endpoint', p ->> 'p256dh', p ->> 'auth', left(p ->> 'device_label', 60), (p ->> 'request_id')::uuid)
+    on conflict (user_id) do update set
+      endpoint = excluded.endpoint,
+      p256dh = excluded.p256dh,
+      auth = excluded.auth,
+      device_label = excluded.device_label,
+      last_request_id = excluded.last_request_id
+    returning * into v_row;
+  exception when check_violation or not_null_violation then
+    return jsonb_build_object('status', 'invalid', 'reason', 'This browser returned a subscription DayKind cannot use.');
+  end;
+  return jsonb_build_object('status', 'saved', 'record', to_jsonb(v_row));
+end;
+$$;
+
+revoke all on function
+  public.save_reminder_settings(jsonb), public.request_test_reminder(jsonb), public.save_push_subscription(jsonb)
+from public, anon;
+grant execute on function
+  public.save_reminder_settings(jsonb), public.request_test_reminder(jsonb), public.save_push_subscription(jsonb)
+to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Dispatcher
@@ -284,7 +367,7 @@ revoke all on function
 from public;
 
 -- Users with email delivery on and a confirmed timezone, for planning.
--- Returns [{user_id, timezone, email_enabled_at, morning_enabled,
+-- Returns [{user_id, timezone, delivery_enabled_at, morning_enabled,
 -- evening_enabled, follow_ups_enabled}]. No email addresses or health data.
 create function public.reminder_dispatch_users(p_key text)
 returns jsonb
@@ -299,7 +382,7 @@ begin
     select jsonb_agg(jsonb_build_object(
       'user_id', s.user_id,
       'timezone', pr.timezone,
-      'email_enabled_at', s.email_enabled_at,
+      'delivery_enabled_at', s.delivery_enabled_at,
       'morning_enabled', s.morning_enabled,
       'evening_enabled', s.evening_enabled,
       'follow_ups_enabled', s.follow_ups_enabled
@@ -307,7 +390,7 @@ begin
     from public.reminder_settings s
     join public.profiles pr on pr.user_id = s.user_id
     join daykind_private.allowed_users a on a.user_id = s.user_id
-    where s.email_enabled and pr.timezone_confirmed and pr.onboarding_completed_at is not null
+    where s.delivery_enabled and pr.timezone_confirmed and pr.onboarding_completed_at is not null
   ), '[]'::jsonb);
 end;
 $$;
@@ -331,7 +414,7 @@ begin
     from jsonb_array_elements(coalesce(p_slots, '[]'::jsonb)) s
    where s ->> 'kind' in ('morning', 'evening')
      and exists (select 1 from public.reminder_settings rs
-                  where rs.user_id = (s ->> 'user_id')::uuid and rs.email_enabled)
+                  where rs.user_id = (s ->> 'user_id')::uuid and rs.delivery_enabled)
   on conflict (user_id, kind, local_date, stage) where kind <> 'test' do nothing;
   get diagnostics v_count = row_count;
   return v_count;
@@ -345,10 +428,19 @@ $$;
 -- two hours late (15 minutes for a test). Rows that fail a rule are closed
 -- with a reason. Rows locked by a concurrent run are skipped, and a claimed
 -- row is leased for five minutes; a lease that expired (the run died) can be
--- claimed again, and the provider idempotency key prevents a second email.
--- p_now defaults to the database clock. Returns [{id, claim_token, email,
--- kind, stage, local_date, attempt}].
-create function public.reminder_claim(p_key text, p_now timestamptz default null, p_limit integer default 20, p_only uuid default null)
+-- claimed again, and the provider idempotency key (email) or topic (push)
+-- prevents a second alert.
+--
+-- The channel is the user's chosen one (a test names its own) and stays fixed
+-- after the first attempt, so a retry never switches channel. p_channels
+-- lists the channels this server can send; others are closed as
+-- channel_unavailable. p_now defaults to the database clock.
+-- Returns [{id, claim_token, channel, email?, push?: {subscription_id,
+-- endpoint, p256dh, auth}, kind, stage, local_date, attempt}].
+create function public.reminder_claim(
+  p_key text, p_now timestamptz default null, p_limit integer default 20, p_only uuid default null,
+  p_channels text[] default array['email']
+)
 returns jsonb
 language plpgsql
 security definer
@@ -360,6 +452,8 @@ declare
   s public.reminder_settings;
   pr public.profiles;
   v_email text;
+  v_channel text;
+  v_push public.push_subscriptions;
   v_status text;
   v_reason text;
   v_claim uuid;
@@ -381,6 +475,10 @@ begin
     select * into s from public.reminder_settings where user_id = r.user_id;
     select * into pr from public.profiles where user_id = r.user_id;
     select email into v_email from auth.users where id = r.user_id;
+    select * into v_push from public.push_subscriptions where user_id = r.user_id;
+    v_channel := case
+      when r.kind = 'test' or (r.attempts > 0 and r.channel is not null) then r.channel
+      else coalesce(s.channel, 'email') end;
     v_window := case when r.kind = 'test' then interval '15 minutes' else interval '2 hours' end;
 
     if not exists (select 1 from daykind_private.allowed_users where user_id = r.user_id) then
@@ -388,7 +486,7 @@ begin
     elsif r.attempts >= 4 then
       v_status := 'failed'; v_reason := 'retries_exhausted';
     elsif r.kind <> 'test' then
-      if s.user_id is null or not s.email_enabled or r.scheduled_at < s.email_enabled_at then
+      if s.user_id is null or not s.delivery_enabled or r.scheduled_at < s.delivery_enabled_at then
         v_status := 'skipped'; v_reason := 'delivery_off';
       elsif (r.kind = 'morning' and not s.morning_enabled) or (r.kind = 'evening' and not s.evening_enabled) then
         v_status := 'skipped'; v_reason := 'reminder_off';
@@ -420,24 +518,36 @@ begin
       v_status := case when r.attempts = 0 then 'skipped' else 'failed' end;
       v_reason := 'too_late';
     end if;
-    if v_status is null and (v_email is null or v_email = '') then
+    if v_status is null and not (v_channel = any (coalesce(p_channels, '{}'))) then
+      v_status := case when r.attempts = 0 then 'skipped' else 'failed' end;
+      v_reason := 'channel_unavailable';
+    end if;
+    if v_status is null and v_channel = 'email' and (v_email is null or v_email = '') then
       v_status := 'failed'; v_reason := 'no_address';
+    end if;
+    if v_status is null and v_channel = 'push' and v_push.id is null then
+      v_status := 'failed'; v_reason := 'no_device';
     end if;
 
     if v_status is not null then
       update public.reminder_occurrences
-         set status = v_status, status_reason = v_reason, claim_token = null, claimed_until = null
+         set status = v_status, status_reason = v_reason, channel = coalesce(channel, v_channel),
+             claim_token = null, claimed_until = null
        where id = r.id;
       continue;
     end if;
 
     v_claim := gen_random_uuid();
     update public.reminder_occurrences
-       set status = 'sending', status_reason = null, attempts = attempts + 1,
+       set status = 'sending', status_reason = null, attempts = attempts + 1, channel = v_channel,
            claim_token = v_claim, claimed_until = v_now + interval '5 minutes'
      where id = r.id;
     v_out := v_out || jsonb_build_object(
-      'id', r.id, 'claim_token', v_claim, 'email', v_email, 'kind', r.kind, 'stage', r.stage,
+      'id', r.id, 'claim_token', v_claim, 'channel', v_channel,
+      'email', case when v_channel = 'email' then v_email end,
+      'push', case when v_channel = 'push' then jsonb_build_object(
+        'subscription_id', v_push.id, 'endpoint', v_push.endpoint, 'p256dh', v_push.p256dh, 'auth', v_push.auth) end,
+      'kind', r.kind, 'stage', r.stage,
       'local_date', to_char(r.local_date, 'YYYY-MM-DD'), 'attempt', r.attempts + 1
     );
   end loop;
@@ -504,17 +614,33 @@ begin
 end;
 $$;
 
+-- Removes a push subscription the push service reported as gone (HTTP 404 or
+-- 410), so the user sees "no browser registered" instead of repeated failures.
+create function public.reminder_drop_subscription(p_key text, p_subscription uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform daykind_private.require_dispatch_key(p_key);
+  delete from public.push_subscriptions where id = p_subscription;
+end;
+$$;
+
 -- The dispatcher connects with the publishable key and no session (anon). The
 -- dispatch key, checked first in each function, is what authorizes it.
 revoke all on function
   public.reminder_dispatch_users(text),
   public.reminder_plan(text, jsonb),
-  public.reminder_claim(text, timestamptz, integer, uuid),
-  public.reminder_record(text, uuid, uuid, text, text, timestamptz)
+  public.reminder_claim(text, timestamptz, integer, uuid, text[]),
+  public.reminder_record(text, uuid, uuid, text, text, timestamptz),
+  public.reminder_drop_subscription(text, uuid)
 from public;
 grant execute on function
   public.reminder_dispatch_users(text),
   public.reminder_plan(text, jsonb),
-  public.reminder_claim(text, timestamptz, integer, uuid),
-  public.reminder_record(text, uuid, uuid, text, text, timestamptz)
+  public.reminder_claim(text, timestamptz, integer, uuid, text[]),
+  public.reminder_record(text, uuid, uuid, text, text, timestamptz),
+  public.reminder_drop_subscription(text, uuid)
 to anon, authenticated;

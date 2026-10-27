@@ -5,8 +5,10 @@ import {
   dueSlots,
   followUpsInQuietHours,
   inQuietHours,
+  describeDevice,
   occurrenceStatusText,
   slotInstant,
+  validatePushSubscription,
   validateReminderSettings,
   type PlanningUser,
   type ReminderOccurrence,
@@ -14,7 +16,7 @@ import {
 
 const user = (overrides: Partial<PlanningUser> = {}): PlanningUser => ({
   timezone: "America/Los_Angeles",
-  emailEnabledAt: "2026-01-01T00:00:00Z",
+  deliveryEnabledAt: "2026-01-01T00:00:00Z",
   morningEnabled: true,
   eveningEnabled: true,
   followUpsEnabled: true,
@@ -44,9 +46,9 @@ describe("slot times", () => {
 
 describe("dueSlots", () => {
   it("includes only slots at or before now", () => {
-    expect(keys(user({ emailEnabledAt: "2026-10-27T07:00:00Z" }), "2026-10-27T16:59:59Z")).toEqual([]);
-    expect(keys(user({ emailEnabledAt: "2026-10-27T07:00:00Z" }), "2026-10-27T17:00:00Z")).toEqual(["2026-10-27 morning initial"]);
-    expect(keys(user({ emailEnabledAt: "2026-10-27T07:00:00Z" }), "2026-10-28T05:00:00Z")).toEqual([
+    expect(keys(user({ deliveryEnabledAt: "2026-10-27T07:00:00Z" }), "2026-10-27T16:59:59Z")).toEqual([]);
+    expect(keys(user({ deliveryEnabledAt: "2026-10-27T07:00:00Z" }), "2026-10-27T17:00:00Z")).toEqual(["2026-10-27 morning initial"]);
+    expect(keys(user({ deliveryEnabledAt: "2026-10-27T07:00:00Z" }), "2026-10-28T05:00:00Z")).toEqual([
       "2026-10-27 morning initial",
       "2026-10-27 morning follow_up",
       "2026-10-27 evening initial",
@@ -64,18 +66,18 @@ describe("dueSlots", () => {
   });
 
   it("plans nothing before delivery was turned on, or when it is off", () => {
-    expect(keys(user({ emailEnabledAt: "2026-10-27T17:30:00Z" }), "2026-10-27T18:00:00Z")).toEqual(["2026-10-27 morning follow_up"]);
-    expect(keys(user({ emailEnabledAt: null }), "2026-10-27T18:00:00Z")).toEqual([]);
+    expect(keys(user({ deliveryEnabledAt: "2026-10-27T17:30:00Z" }), "2026-10-27T18:00:00Z")).toEqual(["2026-10-27 morning follow_up"]);
+    expect(keys(user({ deliveryEnabledAt: null }), "2026-10-27T18:00:00Z")).toEqual([]);
   });
 
   it("leaves out disabled reminders and follow-ups", () => {
-    const u = user({ emailEnabledAt: "2026-10-27T07:00:00Z", morningEnabled: false, followUpsEnabled: false });
+    const u = user({ deliveryEnabledAt: "2026-10-27T07:00:00Z", morningEnabled: false, followUpsEnabled: false });
     expect(keys(u, "2026-10-28T05:00:00Z")).toEqual(["2026-10-27 evening initial"]);
   });
 
   it("uses the check-in date in the user's timezone", () => {
     // 2026-10-27T01:00Z is still Oct 26 in Los Angeles but already Oct 27 in Tokyo.
-    const tokyo = user({ timezone: "Asia/Tokyo", emailEnabledAt: "2026-10-26T15:00:00Z" });
+    const tokyo = user({ timezone: "Asia/Tokyo", deliveryEnabledAt: "2026-10-26T15:00:00Z" });
     expect(dueSlots(tokyo, new Date("2026-10-27T01:00:00Z"))[0]).toMatchObject({
       localDate: "2026-10-27",
       kind: "morning",
@@ -107,11 +109,19 @@ describe("quiet hours", () => {
 
 describe("validateReminderSettings", () => {
   it("reads checkboxes and times", () => {
-    const r = validateReminderSettings({ emailEnabled: "on", eveningEnabled: "on", quietHoursEnabled: "on", quietStart: "22:30", quietEnd: "08:00" });
+    const r = validateReminderSettings({
+      deliveryEnabled: "on",
+      channel: "push",
+      eveningEnabled: "on",
+      quietHoursEnabled: "on",
+      quietStart: "22:30",
+      quietEnd: "08:00",
+    });
     expect(r).toEqual({
       ok: true,
       value: {
-        emailEnabled: true,
+        deliveryEnabled: true,
+        channel: "push",
         morningEnabled: false,
         eveningEnabled: true,
         followUpsEnabled: false,
@@ -122,12 +132,12 @@ describe("validateReminderSettings", () => {
     });
   });
 
-  it("rejects malformed or equal times", () => {
-    expect(validateReminderSettings({ quietStart: "25:00", quietEnd: "8:00" })).toMatchObject({
+  it("rejects malformed or equal times and an unknown channel", () => {
+    expect(validateReminderSettings({ channel: "sms", quietStart: "25:00", quietEnd: "8:00" })).toMatchObject({
       ok: false,
-      errors: { quietStart: expect.any(String), quietEnd: expect.any(String) },
+      errors: { channel: expect.any(String), quietStart: expect.any(String), quietEnd: expect.any(String) },
     });
-    expect(validateReminderSettings({ quietStart: "08:00", quietEnd: "08:00" })).toMatchObject({
+    expect(validateReminderSettings({ channel: "email", quietStart: "08:00", quietEnd: "08:00" })).toMatchObject({
       ok: false,
       errors: { quietEnd: "Quiet hours need different start and end times." },
     });
@@ -139,6 +149,7 @@ describe("status text", () => {
     id: "x",
     kind: "morning",
     stage: "initial",
+    channel: "email",
     localDate: "2026-10-27",
     timezone: "UTC",
     scheduledAt: "2026-10-27T10:00:00Z",
@@ -154,5 +165,38 @@ describe("status text", () => {
       "Not sent: the check-in was already done",
     );
     expect(occurrenceStatusText({ ...base, status: "pending", attempts: 2 })).toBe("Retrying soon");
+    expect(occurrenceStatusText({ ...base, channel: "push" })).toBe("Accepted by the push service");
+  });
+});
+
+describe("browser subscriptions", () => {
+  const json = { endpoint: "https://fcm.googleapis.com/fcm/send/abc", keys: { p256dh: "BNcR-_x", auth: "tBHI_tJ" } };
+
+  it("accepts a PushSubscription's JSON and cleans the label", () => {
+    expect(validatePushSubscription(json, "Chrome on <b>Android</b>")).toEqual({
+      endpoint: json.endpoint,
+      p256dh: "BNcR-_x",
+      auth: "tBHI_tJ",
+      deviceLabel: "Chrome on bAndroid/b",
+    });
+  });
+
+  it("rejects anything else", () => {
+    expect(validatePushSubscription(null, null)).toBeNull();
+    expect(validatePushSubscription({ ...json, endpoint: "http://push.example.test/x" }, null)).toBeNull();
+    expect(validatePushSubscription({ ...json, endpoint: "not a url" }, null)).toBeNull();
+    expect(validatePushSubscription({ ...json, keys: { p256dh: "a b", auth: "x" } }, null)).toBeNull();
+    expect(validatePushSubscription({ endpoint: json.endpoint }, null)).toBeNull();
+  });
+
+  it("names common browsers", () => {
+    expect(describeDevice("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36")).toBe(
+      "Chrome on Android",
+    );
+    expect(describeDevice("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15")).toBe(
+      "Safari on macOS",
+    );
+    expect(describeDevice("Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/130.0 Safari/537.36 Edg/130.0")).toBe("Edge on Windows");
+    expect(describeDevice("")).toBe("Browser on this device");
   });
 });

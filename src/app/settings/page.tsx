@@ -13,6 +13,7 @@ import { loadSettings } from "@/lib/views/loaders";
 import { signOut } from "../sign-in/actions";
 import { GuidanceLimits } from "./guidance-limits";
 import { PreferencesForm, TargetsForm } from "./preferences-form";
+import { PushDevice } from "./push-device";
 import { RemindersForm, TestNotification } from "./reminders-form";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -47,7 +48,10 @@ function ReminderStatusList({ occurrences, timezone }: { occurrences: ReminderOc
       {occurrences.map((o) => (
         <li key={o.id} className="entry">
           <div className="entry-main">
-            <strong>{occurrenceLabel(o)}</strong>
+            <strong>
+              {occurrenceLabel(o)}
+              {o.channel ? <span className="muted"> · {o.channel === "push" ? "browser" : "email"}</span> : null}
+            </strong>
             <p className="small muted">
               {formatLocalDate(o.localDate)} · {formatTime(o.sentAt ?? o.scheduledAt, o.timezone)}
               {o.timezone === timezone ? null : ` (${o.timezone.replaceAll("_", " ")})`} · {occurrenceStatusText(o)}
@@ -187,38 +191,51 @@ async function SettingsContent() {
         </div>
         {isSample ? (
           <p className="small muted">Sample mode: you can try these settings, but changes are checked and not saved, and nothing is sent.</p>
-        ) : reminders.deliveryConfigured ? null : (
+        ) : reminders.channels.length === 0 ? (
           <p className="notice small">
-            Email delivery isn&apos;t set up on this server yet, so no reminders are sent. You can still choose your
+            Reminder delivery isn&apos;t set up on this server yet, so nothing is sent. You can still choose your
             settings. Setup steps are in doc/reminders.md.
           </p>
-        )}
-        <RemindersForm settings={reminders.settings} email={email} timezone={profile.timezone} />
+        ) : null}
+        <RemindersForm
+          settings={reminders.settings}
+          email={email}
+          timezone={profile.timezone}
+          pushDeviceLabel={reminders.pushDevice ? (reminders.pushDevice.deviceLabel ?? "your registered browser") : null}
+        />
+        <div className="stack-sm">
+          <h3>Browser for notifications</h3>
+          <PushDevice vapidPublicKey={reminders.vapidPublicKey} registered={reminders.pushDevice} disabled={isSample} />
+          <p className="small muted">
+            Notifications show only which check-in is open. On Android, Chrome must be allowed to show
+            notifications; focus modes and battery savers can still hide them.
+          </p>
+        </div>
         <div className="stack-sm">
           <h3>Test notification</h3>
-          <p className="small">
-            Sends one email now through the same path as reminders, even if email reminders are off.
-          </p>
-          <TestNotification disabled={isSample || !reminders.deliveryConfigured} />
+          <p className="small">Sends one now through the same path as reminders, even if reminders are off.</p>
+          <div className="row">
+            <TestNotification
+              channel="email"
+              label="Send a test email"
+              disabled={isSample || !reminders.channels.includes("email")}
+            />
+            <TestNotification
+              channel="push"
+              label="Send a test browser notification"
+              disabled={isSample || !reminders.channels.includes("push") || !reminders.pushDevice}
+            />
+          </div>
         </div>
         <div className="stack-sm">
           <h3>Recent notifications</h3>
           <ReminderStatusList occurrences={reminders.occurrences} timezone={profile.timezone} />
           <p className="small muted">
-            &ldquo;Accepted&rdquo; means the mail service took the email, not that it reached your inbox or was
-            read. Due check-ins always show on Today, whether or not an email was sent.
+            &ldquo;Accepted&rdquo; means the mail or push service took the notification, not that it was shown or
+            read. Due check-ins always show on Today, whether or not a reminder was sent.
           </p>
         </div>
-        <div className="stack-sm">
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <h3>Browser notifications</h3>
-            <LaterBadge>Planned</LaterBadge>
-          </div>
-          <p className="small muted">
-            Browser and phone notifications are planned. The Monday report notice will come with stored weekly
-            reports.
-          </p>
-        </div>
+        <p className="small muted">The Monday report notice will come with stored weekly reports.</p>
       </section>
 
       <section className="card stack-sm" aria-labelledby="integrations-heading">
