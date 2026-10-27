@@ -2,7 +2,7 @@
 
 A private, responsive web app for one person that keeps sleep, activity, and ankle and recovery check-ins together, with explainable daily guidance and a weekly report. The product requirements are in [`doc/personal-recovery-app-prd.md`](doc/personal-recovery-app-prd.md).
 
-> **Status: daily check-ins, workout import, and editable preferences with private storage.** By default the app runs in **sample mode**, with clearly labeled, invented, read-only data and no sign-in. With `DAYKIND_DATA_SOURCE=supabase`, it signs in one intended user, walks them through first-use setup (timezone, units, targets, guidance limits), and stores check-ins, activities, ankle entries, preferences, and effective-dated targets in Supabase, with ownership enforced by row-level security. Setup: [`doc/supabase-setup.md`](doc/supabase-setup.md). Notifications and weekly report storage are not built yet (see [What's not built yet](#whats-not-built-yet)).
+> **Status: daily check-ins, workout import, editable preferences, and email check-in reminders, with private storage.** By default the app runs in **sample mode**, with clearly labeled, invented, read-only data and no sign-in. With `DAYKIND_DATA_SOURCE=supabase`, it signs in one intended user, walks them through first-use setup (timezone, units, targets, guidance limits), and stores check-ins, activities, ankle entries, preferences, and effective-dated targets in Supabase, with ownership enforced by row-level security. Setup: [`doc/supabase-setup.md`](doc/supabase-setup.md). Email reminders (10 AM, 9 PM, one follow-up, quiet hours) are sent by a server-side scheduler once they are configured and turned on: see [`doc/reminders.md`](doc/reminders.md). Browser push notifications and weekly report storage are not built yet (see [What's not built yet](#whats-not-built-yet)).
 
 ## Local setup
 
@@ -32,8 +32,14 @@ See [`.env.example`](.env.example). It contains no secrets.
 | `DAYKIND_DATA_SOURCE` | `sample` | `sample` (read-only invented data, no sign-in) or `supabase` (sign-in and private storage). Set it before `npm run build`. |
 | `DAYKIND_SAMPLE_TIMEZONE` | `America/Los_Angeles` | IANA timezone that decides "today" for the sample data. |
 | `SUPABASE_URL` | — | Supabase project URL (Supabase mode). |
-| `SUPABASE_PUBLISHABLE_KEY` | — | Supabase publishable (anon) key. All queries still run as the signed-in user under row-level security. The service-role key is never used. |
+| `SUPABASE_PUBLISHABLE_KEY` | — | Supabase publishable (anon) key. App queries run as the signed-in user under row-level security; the reminder dispatcher uses this key without a session and is authorized only for its own functions by the dispatch key. The service-role key is never used. |
 | `DAYKIND_ALLOWED_EMAILS` | — | Comma-separated emails allowed to use the app. The database allowlist is the enforcing control. |
+| `DAYKIND_APP_URL` | — | Public base URL used for links in reminder emails. |
+| `REMINDER_DISPATCH_SECRET` | — | Secret the scheduler sends to `/api/reminders/dispatch`; its SHA-256 hash is registered in the database. Server-only. |
+| `RESEND_API_KEY` | — | Resend API key for reminder email. Server-only. |
+| `REMINDER_EMAIL_FROM` | — | Sender for reminder email, on a domain verified with Resend. |
+
+The four reminder variables are optional: without them, reminders cannot be sent and Settings says so. See [`doc/reminders.md`](doc/reminders.md).
 
 ### Scripts
 
@@ -63,7 +69,8 @@ GitHub Actions runs `npm run check` and the production build on every pull reque
 | `/symptoms/new`, `/symptoms/edit?id=` | Record or edit an ankle observation outside a check-in |
 | `/report` | **Weekly report**: the last completed Monday–Sunday week, with coverage, sleep, target status, symptoms, optional weight, and one focus |
 | `/import` | **Import a workout file**: Garmin TCX or FIT upload, preview, and duplicate review before saving. Reached from the evening check-in and Settings. |
-| `/settings` | **Settings**: account and sign-out; edit the timezone, units, and weight tracking; see the targets in effect and any upcoming change, and edit or cancel that change; workout import link; guidance limits. Reminders and export/delete are marked "Not available yet". |
+| `/settings` | **Settings**: account and sign-out; edit the timezone, units, and weight tracking; see the targets in effect and any upcoming change, and edit or cancel that change; email reminders (opt-in, which reminders, follow-ups, quiet hours), a test email, and recent delivery status; workout import link; guidance limits. Export/delete are marked "Not available yet". |
+| `/api/reminders/dispatch` | Scheduler endpoint (no page). Requires the dispatch secret as a bearer token. |
 
 Phones get a bottom tab bar. Screens 900 px and wider get a sidebar.
 
@@ -87,6 +94,7 @@ src/
     supabase/           Supabase client and configuration
     forms/              Shared server-action form handling (idempotency, save states)
     views/loaders.ts    Combines repository reads with domain logic into data for each screen
+    reminders/          Reminder dispatcher, Resend email sender, notification text, scheduler auth
 supabase/migrations/    Versioned SQL: tables, constraints, row-level security, write functions
 doc/activity-contract.md  Shared Activity contract used by the workout-import feature
 ```
@@ -111,9 +119,9 @@ This project uses Next.js 16 with **Cache Components** turned on, so data that d
 
 ## What's not built yet
 
-- **Still missing from preferences:** reminder delivery settings, backdating a target change, saving the weekly focus, weight entry (the weight preference only controls whether and how weight is shown), and data export and account deletion.
+- **Still missing from preferences:** backdating a target change, saving the weekly focus, weight entry (the weight preference only controls whether and how weight is shown), and data export and account deletion.
 - **Check-in drafts:** check-ins are saved complete only. Partial drafts and offline drafts are later work.
-- **Reminders and notifications** (10 AM, 9 PM, follow-ups, quiet hours, the Monday report notice). Settings says they are not available, and no reminders are sent.
+- **Browser push notifications, the Monday report notice, snooze, and adjustable reminder times.** Email reminders are built; these are not. See [`doc/reminders.md`](doc/reminders.md#limitations).
 - **Garmin Connect sync.** Workouts come from manual entry or uploaded TCX/FIT files (built on [`doc/activity-contract.md`](doc/activity-contract.md)). There is no provider sync.
 - **Scheduled weekly reports.** The report is calculated each time the page opens. There are no stored, versioned, or stale/revised reports yet.
 - **Guidance wording** is draft text (rule set `draft-2026-10-20.1`) that still needs review against the user's own care guidance. Sleep and target thresholds are the PRD's proposed defaults (Section 15), not confirmed decisions.

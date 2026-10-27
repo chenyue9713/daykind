@@ -39,7 +39,8 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Skip static assets and the workout-import upload handlers, which stream
-  // large request bodies and authenticate on their own.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|import/preview|import/confirm|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
+  // Skip static assets, the workout-import upload handlers (which stream
+  // large request bodies), and the reminder scheduler endpoint (called with a
+  // bearer secret, never a session). Each authenticates on its own.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|import/preview|import/confirm|api/reminders/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
 };

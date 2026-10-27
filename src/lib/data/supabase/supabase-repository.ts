@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { isSuspectedDuplicate, validateActivityDraft, type ActivityDraft } from "@/lib/domain/activity";
 import { addDays, localDateOf } from "@/lib/domain/dates";
+import { DEFAULT_REMINDER_SETTINGS } from "@/lib/domain/reminders";
 import { DEFAULT_GOALS } from "@/lib/domain/targets";
 import type { DateRange, Instant, UserProfile } from "@/lib/domain/types";
 import type {
@@ -20,6 +21,7 @@ import {
   importPayload,
   morningPayload,
   preferencesPayload,
+  reminderSettingsPayload,
   symptomPayload,
   targetsPayload,
   toActivity,
@@ -27,6 +29,8 @@ import {
   toEveningEntry,
   toGoalVersion,
   toProfile,
+  toReminderOccurrence,
+  toReminderSettings,
   toSleepEntry,
   toSymptomEntry,
 } from "./mapping";
@@ -357,5 +361,30 @@ export function createSupabaseRepository({ client, userId }: Options): DayKindRe
       return { status: "saved", savedAt: String(updated.data[0].updated_at), record: toSymptomEntry(updated.data[0]) };
     },
     deleteSymptomEntry: (input) => remove("symptom_entries", input),
+
+    async getReminderSettings() {
+      const rows = await select("reminder settings", client.from("reminder_settings").select("*").eq("user_id", userId));
+      return rows[0] ? toReminderSettings(rows[0]) : DEFAULT_REMINDER_SETTINGS;
+    },
+    saveReminderSettings: (input, meta) =>
+      rpc("save_reminder_settings", reminderSettingsPayload(input, meta), toReminderSettings),
+    async listReminderOccurrences(limit) {
+      const rows = await select(
+        "reminder status",
+        client.from("reminder_occurrences").select("*").order("scheduled_at", { ascending: false }).limit(limit),
+      );
+      return rows.map(toReminderOccurrence);
+    },
+    async requestTestReminder(meta) {
+      const { data, error } = await client.rpc("request_test_reminder", { p: { request_id: meta.requestId } });
+      if (error) {
+        logError("request_test_reminder", error);
+        return { status: "failed", reason: SAVE_FAILED };
+      }
+      const r = data as RpcResult;
+      if (r.status === "saved") return { status: "saved", savedAt: new Date().toISOString(), record: toReminderOccurrence(r.record!) };
+      if (r.status === "rate_limited") return { status: "conflict", reason: r.reason ?? "Too many test notifications." };
+      return { status: "not_found", reason: r.reason ?? "Your account could not be found." };
+    },
   };
 }

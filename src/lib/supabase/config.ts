@@ -1,6 +1,8 @@
 // Supabase settings. Only the project URL and the publishable (anon) key are
-// used: every query runs as the signed-in user, so row-level security applies.
-// No service-role key is needed or read anywhere in the app.
+// used: app queries run as the signed-in user, so row-level security applies.
+// The reminder dispatcher uses the same key with no session; the functions it
+// calls require the dispatch key (see doc/reminders.md). No service-role key
+// is needed or read anywhere in the app.
 
 export interface SupabaseConfig {
   url: string;

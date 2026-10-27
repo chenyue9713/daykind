@@ -5,6 +5,7 @@ import type { ActivityDraft } from "@/lib/domain/activity";
 import type { EveningCheckIn, MorningCheckIn, QuickActivityInput, SymptomInput } from "@/lib/domain/checkins";
 import { zonedTimeToInstant } from "@/lib/domain/dates";
 import type { TargetsInput } from "@/lib/domain/preferences";
+import type { ReminderOccurrence, ReminderSettings, ReminderSettingsInput } from "@/lib/domain/reminders";
 import type {
   Activity,
   ActivitySource,
@@ -314,5 +315,52 @@ export function preferencesPayload(input: PreferencesWrite, meta: WriteMeta) {
           ...targetValues(targets.values),
         }
       : null,
+  };
+}
+
+/** Postgres `time` arrives as "HH:MM:SS"; the app uses "HH:MM". */
+const hhmm = (v: unknown) => String(v).slice(0, 5);
+
+export function toReminderSettings(row: Row): ReminderSettings {
+  return {
+    emailEnabled: Boolean(row.email_enabled),
+    emailEnabledAt: instantOrNull(row.email_enabled_at),
+    morningEnabled: Boolean(row.morning_enabled),
+    eveningEnabled: Boolean(row.evening_enabled),
+    followUpsEnabled: Boolean(row.follow_ups_enabled),
+    quietHoursEnabled: Boolean(row.quiet_hours_enabled),
+    quietStart: hhmm(row.quiet_start),
+    quietEnd: hhmm(row.quiet_end),
+    revision: Number(row.revision),
+  };
+}
+
+/** `meta.expectedRevision` is the settings revision shown, or null before the first save. */
+export function reminderSettingsPayload(input: ReminderSettingsInput, meta: WriteMeta) {
+  return {
+    request_id: meta.requestId,
+    expected_revision: meta.expectedRevision,
+    email_enabled: input.emailEnabled,
+    morning_enabled: input.morningEnabled,
+    evening_enabled: input.eveningEnabled,
+    follow_ups_enabled: input.followUpsEnabled,
+    quiet_hours_enabled: input.quietHoursEnabled,
+    quiet_start: input.quietStart,
+    quiet_end: input.quietEnd,
+  };
+}
+
+export function toReminderOccurrence(row: Row): ReminderOccurrence {
+  return {
+    id: str(row.id),
+    kind: row.kind as ReminderOccurrence["kind"],
+    stage: row.stage as ReminderOccurrence["stage"],
+    localDate: date(row.local_date),
+    timezone: str(row.timezone),
+    scheduledAt: instant(row.scheduled_at),
+    status: row.status as ReminderOccurrence["status"],
+    statusReason: (row.status_reason ?? null) as ReminderOccurrence["statusReason"],
+    attempts: Number(row.attempts),
+    sentAt: instantOrNull(row.sent_at),
   };
 }

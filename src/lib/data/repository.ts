@@ -5,6 +5,7 @@
 import type { ActivityDraft, DuplicateProbe } from "@/lib/domain/activity";
 import type { EveningCheckIn, MorningCheckIn, SymptomInput } from "@/lib/domain/checkins";
 import type { PreferencesInput, TargetsInput } from "@/lib/domain/preferences";
+import type { ReminderOccurrence, ReminderSettings, ReminderSettingsInput } from "@/lib/domain/reminders";
 import type {
   Activity,
   ActivitySource,
@@ -210,4 +211,16 @@ export interface DayKindRepository extends ActivityStore {
   getSymptomEntry(id: string): Promise<SymptomEntry | null>;
   saveSymptomEntry(id: string | null, input: SymptomWrite, meta: WriteMeta): Promise<MutationResult<SymptomEntry>>;
   deleteSymptomEntry(input: DeleteInput): Promise<MutationResult<null>>;
+
+  /** The saved reminder settings, or the defaults (revision null) before the first save. */
+  getReminderSettings(): Promise<ReminderSettings>;
+  /** meta.expectedRevision is the revision shown, or null when nothing was saved yet. */
+  saveReminderSettings(input: ReminderSettingsInput, meta: WriteMeta): Promise<MutationResult<ReminderSettings>>;
+  /** The most recent reminder occurrences, newest first, for delivery status. */
+  listReminderOccurrences(limit: number): Promise<ReminderOccurrence[]>;
+  /**
+   * Records a test notification for the dispatcher to send now. Limited to
+   * five per hour ("conflict" with a reason when over the limit).
+   */
+  requestTestReminder(meta: WriteMeta): Promise<MutationResult<ReminderOccurrence>>;
 }

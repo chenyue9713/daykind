@@ -10,6 +10,7 @@ import { durationBasisLabel, formatDuration } from "@/lib/domain/format";
 import { evaluateGuidance } from "@/lib/domain/guidance";
 import { needsOnboarding, targetSchedule, timezoneOptions } from "@/lib/domain/preferences";
 import { buildWeeklyReport } from "@/lib/domain/report";
+import { reminderEnv } from "@/lib/reminders/config";
 import { computeWeeklyProgress, goalSeconds, goalsForWeek } from "@/lib/domain/targets";
 import type { Activity, GoalVersion, LocalDate, UserProfile } from "@/lib/domain/types";
 
@@ -21,10 +22,11 @@ function requireGoals(versions: GoalVersion[], start: LocalDate): GoalVersion {
 
 export async function loadToday() {
   const repo = await getSetUpRepository();
-  const [profile, today, goalVersions] = await Promise.all([
+  const [profile, today, goalVersions, reminderSettings] = await Promise.all([
     repo.getProfile(),
     repo.getToday(),
     repo.getGoalVersions(),
+    repo.getReminderSettings(),
   ]);
   const week = weekRange(weekStart(today));
   const todayRange = { start: today, end: today };
@@ -43,6 +45,7 @@ export async function loadToday() {
     isSample: repo.isSample,
     profile,
     today,
+    emailRemindersOn: reminderSettings.emailEnabled && reminderEnv().configured,
     sleepToday,
     eveningToday,
     activitiesToday: weekActivities.filter((a) => a.localDate === today && a.canonicalStatus === "canonical"),
@@ -154,12 +157,17 @@ export async function loadWeeklyReport() {
   return { isSample: repo.isSample, profile, report };
 }
 
+/** Recent reminder occurrences shown as delivery status in Settings. */
+export const REMINDER_STATUS_LIMIT = 12;
+
 export async function loadSettings() {
   const repo = await getSetUpRepository();
-  const [profile, today, goalVersions] = await Promise.all([
+  const [profile, today, goalVersions, reminderSettings, reminderOccurrences] = await Promise.all([
     repo.getProfile(),
     repo.getToday(),
     repo.getGoalVersions(),
+    repo.getReminderSettings(),
+    repo.listReminderOccurrences(REMINDER_STATUS_LIMIT),
   ]);
   const user = await getCurrentUser();
   return {
@@ -170,6 +178,12 @@ export async function loadSettings() {
     today,
     schedule: targetSchedule(goalVersions, today),
     timezones: timezoneOptions(profile.timezone),
+    reminders: {
+      settings: reminderSettings,
+      occurrences: reminderOccurrences,
+      /** Whether this server can send email; the values themselves never leave the server. */
+      deliveryConfigured: reminderEnv().configured,
+    },
   };
 }
 
