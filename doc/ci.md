@@ -14,7 +14,7 @@ The Supabase-mode job is **only a build check**. Its URL (`http://127.0.0.1:5432
 
 ### Settings
 
-- **Node.js:** `NODE_VERSION: "22"` at the top of the workflow, used by every job. Change it there only. Node 20 is not enough: Vitest 5 requires `^22.12.0 || ^24 || >=26`, even though `package.json` `engines` says `>=20.9`.
+- **Node.js:** `NODE_VERSION: "22"` at the top of the workflow, used by every job. Change it there only, and keep it within `package.json` `engines` (Node 20 and 25 cannot run the tests or lint tooling).
 - **Dependencies:** `npm ci` from `package-lock.json`. `actions/setup-node` caches npm's download cache keyed on the lockfile. `node_modules` is not cached.
 - **Permissions:** the token is read-only (`contents: read`), and checkout does not keep credentials.
 - **Events:** ordinary `pull_request`, not `pull_request_target`, so code from a pull request never runs with write access or secrets.

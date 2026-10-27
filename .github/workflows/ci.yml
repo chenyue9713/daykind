@@ -19,8 +19,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Node 22 LTS: the version DayKind is developed on. Vitest 5 needs
-  # ^22.12.0 || ^24 || >=26, so Node 20 cannot run the tests.
+  # Node 22 LTS: the version DayKind is developed on. Keep it within
+  # package.json "engines" (Node 20 and 25 cannot run the tests).
   NODE_VERSION: "22"
   NEXT_TELEMETRY_DISABLED: "1"
 
