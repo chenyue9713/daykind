@@ -3,11 +3,12 @@ import "server-only";
 // Screen loaders: compose repository reads with domain logic into view
 // models. Pages call these and render; they never touch a data source directly.
 import { getCurrentUser } from "@/lib/auth/session";
-import { getRepository } from "@/lib/data";
+import { getRepository, getSetUpRepository } from "@/lib/data";
 import { distanceFromMeters, isMeasuredActivity } from "@/lib/domain/activity-form";
 import { addDays, formatTime, isLocalDate, previousWeekRange, weekRange, weekStart } from "@/lib/domain/dates";
 import { durationBasisLabel, formatDuration } from "@/lib/domain/format";
 import { evaluateGuidance } from "@/lib/domain/guidance";
+import { needsOnboarding, targetSchedule, timezoneOptions } from "@/lib/domain/preferences";
 import { buildWeeklyReport } from "@/lib/domain/report";
 import { computeWeeklyProgress, goalSeconds, goalsForWeek } from "@/lib/domain/targets";
 import type { Activity, GoalVersion, LocalDate, UserProfile } from "@/lib/domain/types";
@@ -19,7 +20,7 @@ function requireGoals(versions: GoalVersion[], start: LocalDate): GoalVersion {
 }
 
 export async function loadToday() {
-  const repo = await getRepository();
+  const repo = await getSetUpRepository();
   const [profile, today, goalVersions] = await Promise.all([
     repo.getProfile(),
     repo.getToday(),
@@ -59,7 +60,7 @@ function checkInDate(requested: string | undefined, today: LocalDate): LocalDate
 }
 
 export async function loadMorningCheckIn(requestedDate?: string) {
-  const repo = await getRepository();
+  const repo = await getSetUpRepository();
   const [profile, today] = await Promise.all([repo.getProfile(), repo.getToday()]);
   const date = checkInDate(requestedDate, today);
   const [sleep, symptoms] = await Promise.all([
@@ -76,7 +77,7 @@ export async function loadMorningCheckIn(requestedDate?: string) {
 }
 
 export async function loadEveningCheckIn(requestedDate?: string) {
-  const repo = await getRepository();
+  const repo = await getSetUpRepository();
   const [profile, today] = await Promise.all([repo.getProfile(), repo.getToday()]);
   const date = checkInDate(requestedDate, today);
   const range = { start: date, end: date };
@@ -100,7 +101,7 @@ export async function loadEveningCheckIn(requestedDate?: string) {
 export const HISTORY_DAYS = 14;
 
 export async function loadHistory() {
-  const repo = await getRepository();
+  const repo = await getSetUpRepository();
   const [profile, today] = await Promise.all([repo.getProfile(), repo.getToday()]);
   const range = { start: addDays(today, -(HISTORY_DAYS - 1)), end: today };
   const [sleep, evening, symptoms, activities, weights] = await Promise.all([
@@ -126,7 +127,7 @@ export async function loadHistory() {
 }
 
 export async function loadWeeklyReport() {
-  const repo = await getRepository();
+  const repo = await getSetUpRepository();
   const [profile, today, goalVersions] = await Promise.all([
     repo.getProfile(),
     repo.getToday(),
@@ -154,7 +155,7 @@ export async function loadWeeklyReport() {
 }
 
 export async function loadSettings() {
-  const repo = await getRepository();
+  const repo = await getSetUpRepository();
   const [profile, today, goalVersions] = await Promise.all([
     repo.getProfile(),
     repo.getToday(),
@@ -166,7 +167,26 @@ export async function loadSettings() {
     dataSource: repo.kind,
     email: user.email,
     profile,
-    goals: requireGoals(goalVersions, weekStart(today)),
+    today,
+    schedule: targetSchedule(goalVersions, today),
+    timezones: timezoneOptions(profile.timezone),
+  };
+}
+
+/** First-use setup. `done` is true once it was finished (sample mode can still preview it). */
+export async function loadWelcome() {
+  const repo = await getRepository();
+  const [profile, today, goalVersions] = await Promise.all([
+    repo.getProfile(),
+    repo.getToday(),
+    repo.getGoalVersions(),
+  ]);
+  return {
+    isSample: repo.isSample,
+    done: !needsOnboarding(profile),
+    profile,
+    schedule: targetSchedule(goalVersions, today),
+    timezones: timezoneOptions(profile.timezone),
   };
 }
 
@@ -191,7 +211,7 @@ function measuredSummary(a: Activity, profile: UserProfile): string {
 }
 
 export async function loadNewActivityForm(requestedDate?: string) {
-  const repo = await getRepository();
+  const repo = await getSetUpRepository();
   const [profile, today] = await Promise.all([repo.getProfile(), repo.getToday()]);
   return {
     existing: null,
@@ -204,7 +224,7 @@ export async function loadNewActivityForm(requestedDate?: string) {
 }
 
 export async function loadEditActivityForm(id: string) {
-  const repo = await getRepository();
+  const repo = await getSetUpRepository();
   const [profile, today, detail] = await Promise.all([repo.getProfile(), repo.getToday(), repo.getActivity(id)]);
   if (!detail) return null;
   const a = detail.activity;

@@ -4,6 +4,7 @@
 import type { ActivityDraft } from "@/lib/domain/activity";
 import type { EveningCheckIn, MorningCheckIn, QuickActivityInput, SymptomInput } from "@/lib/domain/checkins";
 import { zonedTimeToInstant } from "@/lib/domain/dates";
+import type { TargetsInput } from "@/lib/domain/preferences";
 import type {
   Activity,
   ActivitySource,
@@ -14,7 +15,7 @@ import type {
   SymptomEntry,
   UserProfile,
 } from "@/lib/domain/types";
-import type { ConfirmedImport, WriteMeta } from "../repository";
+import type { ConfirmedImport, PreferencesWrite, TargetWriteMeta, WriteMeta } from "../repository";
 
 type Row = Record<string, unknown>;
 
@@ -46,6 +47,8 @@ export function toProfile(row: Row): UserProfile {
     weightUnit: row.weight_unit as UserProfile["weightUnit"],
     weightTrackingEnabled: Boolean(row.weight_tracking_enabled),
     guidanceLimitsAcknowledgedAt: instantOrNull(row.guidance_limits_acknowledged_at),
+    onboardingCompletedAt: instantOrNull(row.onboarding_completed_at),
+    revision: Number(row.revision),
   };
 }
 
@@ -56,6 +59,7 @@ export function toGoalVersion(row: Row): GoalVersion {
     walkingSecondsPerDay: Number(row.walking_seconds_per_day),
     resistanceSessionsPerWeek: Number(row.resistance_sessions_per_week),
     cyclingSecondsPerWeek: Number(row.cycling_seconds_per_week),
+    revision: Number(row.revision),
   };
 }
 
@@ -270,5 +274,45 @@ export function importPayload(input: ConfirmedImport) {
               expected_revision: s.resolution.expectedRevision,
             },
     })),
+  };
+}
+
+function targetValues(t: TargetsInput) {
+  return {
+    walking_seconds_per_day: t.walkingSecondsPerDay,
+    resistance_sessions_per_week: t.resistanceSessionsPerWeek,
+    cycling_seconds_per_week: t.cyclingSecondsPerWeek,
+  };
+}
+
+/** `meta.id`/`expectedRevision` name the pending version being edited, if any. */
+export function targetsPayload(input: TargetsInput, meta: TargetWriteMeta) {
+  return {
+    request_id: meta.requestId,
+    pending_id: meta.id ?? null,
+    expected_revision: meta.id ? meta.expectedRevision : null,
+    ...targetValues(input),
+  };
+}
+
+/** `meta.expectedRevision` is the profile revision the form was showing. */
+export function preferencesPayload(input: PreferencesWrite, meta: WriteMeta) {
+  const { preferences: p, targets } = input;
+  return {
+    request_id: meta.requestId,
+    expected_revision: meta.expectedRevision,
+    timezone: p.timezone,
+    distance_unit: p.distanceUnit,
+    weight_unit: p.weightUnit,
+    weight_tracking_enabled: p.weightTrackingEnabled,
+    acknowledge_guidance: input.acknowledgeGuidance ?? false,
+    complete_onboarding: input.completeOnboarding ?? false,
+    targets: targets
+      ? {
+          pending_id: targets.pendingId,
+          expected_revision: targets.pendingId ? targets.expectedRevision : null,
+          ...targetValues(targets.values),
+        }
+      : null,
   };
 }

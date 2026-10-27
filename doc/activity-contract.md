@@ -149,3 +149,4 @@ Validation runs twice: in TypeScript before the call, and again by database cons
 
 - **v1** (`665c925`): initial contract.
 - **v1, additive:** `WriteMeta.id` is an optional id of the record being edited. `DayKindRepository.getSymptomEntry` is new. The `ActivityStore` methods and result statuses are unchanged.
+- **v1, additive (preferences):** `UserProfile` gains `onboardingCompletedAt` and `revision`, and `GoalVersion` gains `revision`. Until first-use setup is finished, the import routes answer `409` with code `conflict`, and the import page redirects to `/welcome`, so imports always use a confirmed timezone. Distances still arrive in meters; `formatDistance` now lives in `src/lib/domain/units.ts` and is re-exported from `src/lib/import/format.ts`.

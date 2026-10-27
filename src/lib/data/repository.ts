@@ -4,6 +4,7 @@
 // The activity part is a shared contract: see doc/activity-contract.md.
 import type { ActivityDraft, DuplicateProbe } from "@/lib/domain/activity";
 import type { EveningCheckIn, MorningCheckIn, SymptomInput } from "@/lib/domain/checkins";
+import type { PreferencesInput, TargetsInput } from "@/lib/domain/preferences";
 import type {
   Activity,
   ActivitySource,
@@ -57,6 +58,41 @@ export interface SymptomWrite {
   observedAt: Instant;
   symptom: SymptomInput;
 }
+
+/**
+ * Timezone, units, and weight tracking. Saving always confirms the timezone.
+ * During first-use setup it also records the guidance acknowledgment and the
+ * reviewed targets, all in one transaction.
+ */
+export interface PreferencesWrite {
+  preferences: PreferencesInput;
+  acknowledgeGuidance?: boolean;
+  completeOnboarding?: boolean;
+  /** Targets reviewed during setup; `meta` of the pending version they edit. */
+  targets?: { values: TargetsInput; pendingId: string | null; expectedRevision: number | null } | null;
+}
+
+export interface PreferencesSaved {
+  profile: UserProfile;
+  /** Outcome of `targets`, when they were sent. */
+  targets: TargetChange | null;
+}
+
+/**
+ * A target change starts next Monday in the confirmed timezone. Editing the
+ * pending version updates it in place; setting it back to the targets in
+ * effect removes it. Versions already in effect are never changed.
+ * - scheduled: `version` is the pending version.
+ * - removed: the pending version was removed; nothing changes next Monday.
+ * - unchanged: the values equal the targets in effect and nothing was pending.
+ */
+export interface TargetChange {
+  outcome: "scheduled" | "removed" | "unchanged";
+  version: GoalVersion | null;
+}
+
+/** `id` and `expectedRevision` name the pending version being edited, or are null when none was shown. */
+export type TargetWriteMeta = WriteMeta;
 
 export interface ActivityDetail {
   activity: Activity;
@@ -151,7 +187,10 @@ export interface DayKindRepository extends ActivityStore {
   readonly isSample: boolean;
 
   getProfile(): Promise<UserProfile>;
+  /** Every target version, oldest first, starting with the one that covers the earliest weeks. */
   getGoalVersions(): Promise<GoalVersion[]>;
+  savePreferences(input: PreferencesWrite, meta: WriteMeta): Promise<MutationResult<PreferencesSaved>>;
+  saveTargets(input: TargetsInput, meta: TargetWriteMeta): Promise<MutationResult<TargetChange>>;
   /** The civil date "today" in the user's timezone. */
   getToday(): Promise<LocalDate>;
 

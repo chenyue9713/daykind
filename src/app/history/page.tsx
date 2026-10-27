@@ -16,6 +16,7 @@ import {
   restfulnessLabel,
 } from "@/lib/domain/format";
 import { goalSeconds } from "@/lib/domain/targets";
+import { formatDistance } from "@/lib/domain/units";
 import type { Activity, SymptomEntry } from "@/lib/domain/types";
 import { HISTORY_DAYS, loadHistory } from "@/lib/views/loaders";
 import { RecordActions } from "./record-actions";
@@ -130,7 +131,10 @@ async function HistoryContent() {
                           {activityTypeLabel[a.type]} · {formatDuration(seconds)}
                         </strong>
                         <p className="small muted">
-                          {formatTime(a.startedAt, a.timezone)} · {intensityLabel[a.intensity]} · {durationBasisLabel[basis]}
+                          {formatTime(a.startedAt, a.timezone)}
+                          {a.timezone !== tz && a.startedAt !== null ? ` (${a.timezone.replaceAll("_", " ")} time)` : ""} ·{" "}
+                          {a.distanceMeters === null ? "" : `${formatDistance(a.distanceMeters, profile.distanceUnit)} · `}
+                          {intensityLabel[a.intensity]} · {durationBasisLabel[basis]}
                           {basis === "active" && a.elapsedSeconds !== null && a.activeSeconds !== a.elapsedSeconds
                             ? ` (${formatDuration(a.elapsedSeconds)} elapsed)`
                             : ""}{" "}

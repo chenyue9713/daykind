@@ -2,7 +2,7 @@
 
 A private, responsive web app for one person that keeps sleep, activity, and ankle and recovery check-ins together, with explainable daily guidance and a weekly report. The product requirements are in [`doc/personal-recovery-app-prd.md`](doc/personal-recovery-app-prd.md).
 
-> **Status: daily check-ins with private storage.** By default the app runs in **sample mode**, with clearly labeled, invented, read-only data and no sign-in. With `DAYKIND_DATA_SOURCE=supabase`, it signs in one intended user and stores morning and evening check-ins, activities, and ankle entries in Supabase, with ownership enforced by row-level security. Setup: [`doc/supabase-setup.md`](doc/supabase-setup.md). Notifications and weekly report storage are not built yet (see [What's not built yet](#whats-not-built-yet)).
+> **Status: daily check-ins, workout import, and editable preferences with private storage.** By default the app runs in **sample mode**, with clearly labeled, invented, read-only data and no sign-in. With `DAYKIND_DATA_SOURCE=supabase`, it signs in one intended user, walks them through first-use setup (timezone, units, targets, guidance limits), and stores check-ins, activities, ankle entries, preferences, and effective-dated targets in Supabase, with ownership enforced by row-level security. Setup: [`doc/supabase-setup.md`](doc/supabase-setup.md). Notifications and weekly report storage are not built yet (see [What's not built yet](#whats-not-built-yet)).
 
 ## Local setup
 
@@ -54,6 +54,7 @@ GitHub Actions runs `npm run check` and the production build on every pull reque
 | Route | Screen |
 |---|---|
 | `/sign-in` | **Sign in** (Supabase mode only): email and password for the one allowed account. There is no registration. |
+| `/welcome` | **First-use setup** (Supabase mode, once): confirm the timezone (the device's timezone is offered as a suggestion only), distance units, optional weight tracking and its unit, review the three activity targets, and acknowledge the guidance limits. Every other screen redirects here until it is finished. In sample mode it is a read-only preview linked from Settings. |
 | `/` | **Today**: check-ins due, the day's suggestion and why, today's activity, weekly target progress |
 | `/check-in/morning[?date=]` | **Morning check-in**: actual sleep (exact or a range), interruptions including baby care, how rested and how tired you feel, optional ankle update |
 | `/check-in/evening[?date=]` | **Evening check-in**: existing activities, quick add, a "no activity" option that warns when it conflicts with recorded activity, ankle status, fatigue, recovery day |
@@ -62,7 +63,7 @@ GitHub Actions runs `npm run check` and the production build on every pull reque
 | `/symptoms/new`, `/symptoms/edit?id=` | Record or edit an ankle observation outside a check-in |
 | `/report` | **Weekly report**: the last completed Monday–Sunday week, with coverage, sleep, target status, symptoms, optional weight, and one focus |
 | `/import` | **Import a workout file**: Garmin TCX or FIT upload, preview, and duplicate review before saving. Reached from the evening check-in and Settings. |
-| `/settings` | **Settings**: account and sign-out, timezone, units, targets, and a link to workout import. Reminders and export/delete are marked "Not available yet". |
+| `/settings` | **Settings**: account and sign-out; edit the timezone, units, and weight tracking; see the targets in effect and any upcoming change, and edit or cancel that change; workout import link; guidance limits. Reminders and export/delete are marked "Not available yet". |
 
 Phones get a bottom tab bar. Screens 900 px and wider get a sidebar.
 
@@ -100,6 +101,8 @@ Screens never touch a data source directly. They call loaders, which ask `getRep
 - **Transactions:** an evening check-in, with its new activities, its symptom, and any removals confirmed by "no activity", is saved by one database function. All checks run before any write.
 - **Failures:** forms never reset. A failed or conflicting save says "Not saved" and keeps every answer on screen.
 - **Unknown versus zero:** `null` means unknown, and explicit states use enumerations. For example, evening activity is `logged`, `confirmed_none`, or `unknown`.
+- **Preferences:** the timezone, units, and weight tracking are saved by `save_preferences`, which always marks the timezone confirmed and rejects a stale profile revision. DayKind never changes the timezone by itself: when a device reports a different one, Today and the check-ins say so and link to Settings.
+- **Targets:** a target change is stored as a `goal_versions` row starting **next Monday** in the confirmed timezone (`save_goal_version`). Editing the upcoming change updates that row in place; setting it back to the targets in effect removes it. The first change also stores the defaults as a baseline version, so earlier weeks keep them. A database trigger refuses any insert, edit, or delete of a version that is already in effect, so past weeks and reports keep their targets.
 - **Dates:** "today" is computed in the profile timezone. Sleep belongs to the waking date, and an activity belongs to its local start date. Each record keeps the timezone it was entered in, and future dates are rejected.
 
 ### Next.js notes
@@ -108,7 +111,7 @@ This project uses Next.js 16 with **Cache Components** turned on, so data that d
 
 ## What's not built yet
 
-- **Onboarding and preferences:** confirming the timezone, units, and targets, editing them, saving the weekly focus, weight entry, and data export and account deletion. Until then the profile uses the PRD defaults, and the timezone is marked unconfirmed.
+- **Still missing from preferences:** reminder delivery settings, backdating a target change, saving the weekly focus, weight entry (the weight preference only controls whether and how weight is shown), and data export and account deletion.
 - **Check-in drafts:** check-ins are saved complete only. Partial drafts and offline drafts are later work.
 - **Reminders and notifications** (10 AM, 9 PM, follow-ups, quiet hours, the Monday report notice). Settings says they are not available, and no reminders are sent.
 - **Garmin Connect sync.** Workouts come from manual entry or uploaded TCX/FIT files (built on [`doc/activity-contract.md`](doc/activity-contract.md)). There is no provider sync.

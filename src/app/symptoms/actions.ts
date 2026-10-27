@@ -2,7 +2,7 @@
 
 import { redirect, unstable_rethrow } from "next/navigation";
 
-import { getRepository } from "@/lib/data";
+import { getSetUpRepository } from "@/lib/data";
 import { parseSymptom, type FieldErrors } from "@/lib/domain/checkins";
 import { isLocalDate } from "@/lib/domain/dates";
 import {
@@ -25,7 +25,7 @@ export async function saveSymptom(_prev: CheckInFormState, formData: FormData): 
   if (!symptom) return invalid(errors);
   let savedDate: string | null = null;
   try {
-    const repo = await getRepository();
+    const repo = await getSetUpRepository();
     const today = await repo.getToday();
     const existing = meta.id ? await repo.getSymptomEntry(meta.id) : null;
     if (meta.id && !existing) {

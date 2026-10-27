@@ -2,7 +2,7 @@
 
 import { redirect, unstable_rethrow } from "next/navigation";
 
-import { getRepository } from "@/lib/data";
+import { getSetUpRepository } from "@/lib/data";
 import { parseActivityForm } from "@/lib/domain/activity-form";
 import {
   fromResult,
@@ -21,7 +21,7 @@ export async function saveActivity(_prev: CheckInFormState, formData: FormData):
   if (!meta) return staleForm;
   let savedDate: string | null = null;
   try {
-    const repo = await getRepository();
+    const repo = await getSetUpRepository();
     const [profile, today] = await Promise.all([repo.getProfile(), repo.getToday()]);
     const existing = meta.id ? await repo.getActivity(meta.id) : null;
     if (meta.id && !existing) {

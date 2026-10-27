@@ -3,7 +3,7 @@
 import { refresh } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 
-import { getRepository, type DeleteInput } from "@/lib/data";
+import { getSetUpRepository, type DeleteInput } from "@/lib/data";
 import { UUID_PATTERN, validateEveningCheckIn, validateMorningCheckIn } from "@/lib/domain/checkins";
 import {
   fromResult,
@@ -24,7 +24,7 @@ export async function submitMorningCheckIn(_prev: CheckInFormState, formData: Fo
   const parsed = validateMorningCheckIn(raw);
   if (!parsed.ok) return invalid(parsed.errors);
   try {
-    const repo = await getRepository();
+    const repo = await getSetUpRepository();
     // Sleep belongs to the waking date, which cannot be later than today in the user's timezone.
     if (parsed.value.wakingDate > (await repo.getToday())) {
       return invalid({ wakingDate: "The waking date can't be in the future." });
@@ -41,7 +41,7 @@ export async function submitEveningCheckIn(_prev: CheckInFormState, formData: Fo
   const meta = writeMeta(raw);
   if (!meta) return staleForm;
   try {
-    const repo = await getRepository();
+    const repo = await getSetUpRepository();
     const today = await repo.getToday();
     const date = raw.localDate ?? today;
     if (date > today) return invalid({ localDate: "An evening check-in can't be for a future date." });
@@ -70,7 +70,7 @@ export async function deleteRecord(kind: RecordKind, input: DeleteInput): Promis
     return { status: "failed", message: "Not deleted: reload the page and try again." };
   }
   try {
-    const repo = await getRepository();
+    const repo = await getSetUpRepository();
     const remove = {
       sleep: repo.deleteSleepEntry,
       evening: repo.deleteEveningEntry,

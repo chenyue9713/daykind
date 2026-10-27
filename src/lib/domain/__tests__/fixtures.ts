@@ -14,6 +14,7 @@ export const goals: GoalVersion = {
   walkingSecondsPerDay: 600,
   resistanceSessionsPerWeek: 2,
   cyclingSecondsPerWeek: 3600,
+  revision: 1,
 };
 
 let n = 0;

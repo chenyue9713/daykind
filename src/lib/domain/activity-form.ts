@@ -4,21 +4,15 @@ import { validateActivityDraft, type ActivityDraft } from "./activity";
 import type { FieldErrors, RawForm, Validation } from "./checkins";
 import { isLocalDate, zonedTimeToInstant } from "./dates";
 import type { Activity, ActivityType, DistanceUnit, FieldProvenance, Intensity, LocalDate } from "./types";
+import { metersFromDistance } from "./units";
 
-const METERS_PER_MILE = 1609.344;
+export { distanceFromMeters, metersFromDistance } from "./units";
+
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const REPORTED: FieldProvenance = { source: "manual", kind: "reported" };
 
 const activityTypes: readonly ActivityType[] = ["walking", "cycling", "resistance", "other"];
 const intensities: readonly Intensity[] = ["easy", "moderate", "hard", "unknown"];
-
-export function metersFromDistance(value: number, unit: DistanceUnit): number {
-  return Math.round(value * (unit === "mi" ? METERS_PER_MILE : 1000) * 100) / 100;
-}
-
-export function distanceFromMeters(meters: number, unit: DistanceUnit): number {
-  return meters / (unit === "mi" ? METERS_PER_MILE : 1000);
-}
 
 export interface ActivityFormContext {
   /** The activity being edited; null when adding one. */
