@@ -47,6 +47,8 @@ See [`.env.example`](.env.example). It contains no secrets.
 | `npm test` | Run the unit tests and the database tests (Vitest). The database tests apply the real migrations to an in-process Postgres (PGlite), so they need no Supabase project. |
 | `npm run check` | Run the type check, lint, and tests together |
 
+GitHub Actions runs `npm run check` and the production build on every pull request to `main` and every push to `main`, with no secrets. See [`doc/ci.md`](doc/ci.md) for the jobs, how to reproduce a failure locally, and the check names to require before merging.
+
 ## Screens
 
 | Route | Screen |
